@@ -1,0 +1,60 @@
+#!/bin/sh
+set -e
+
+STATE_DIR=/var/lib/eduka-block
+STATE_FILE="$STATE_DIR/blocklist.json"
+
+install -d -o root -g root -m 0755 "$STATE_DIR"
+install -d -o root -g root -m 0755 /usr/share/Eduka-Block
+
+if [ ! -e "$STATE_FILE" ]; then
+    umask 022
+    printf '%s\n' '{' \
+        '  "schema": 3,' \
+        '  "entries": [],' \
+        '  "adult_protection": {' \
+        '    "enabled": false,' \
+        '    "domain_count": 0,' \
+        '    "source": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts",' \
+        '    "updated_at": null' \
+        '  },' \
+        '  "smart_sync": {"last_run": null},' \
+        '  "squid_proxy": {' \
+        '    "enabled": false,' \
+        '    "keywords": ["adult", "hentai", "nude", "porn", "porno", "pornography", "seks", "sex", "xnxx", "xvideos", "xxx"],' \
+        '    "last_applied_at": null' \
+        '  }' \
+        '}' > "$STATE_FILE"
+fi
+chown root:root "$STATE_FILE"
+chmod 0644 "$STATE_FILE"
+
+if [ -e /usr/share/Eduka-Block/credentials.txt ]; then
+    chown root:root /usr/share/Eduka-Block/credentials.txt
+    chmod 0644 /usr/share/Eduka-Block/credentials.txt
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable eduka-block-firewall.service >/dev/null 2>&1 || true
+    systemctl enable --now eduka-block-sync.timer >/dev/null 2>&1 || true
+    systemctl restart eduka-block-firewall.service >/dev/null 2>&1 || true
+fi
+
+if command -v nmcli >/dev/null 2>&1; then
+    nmcli general reload >/dev/null 2>&1 || true
+fi
+
+# Re-apply an existing Squid setting during upgrades so 0.4 installations gain
+# the localhost-only listener and reversible port migration immediately.
+if [ -x /usr/lib/eduka-block/eduka-block-helper ]; then
+    if ! /usr/lib/eduka-block/eduka-block-helper apply-squid </dev/null >/dev/null 2>&1; then
+        printf '%s\n' 'Eduka-Block: existing Squid configuration needs review in the application.' >&2
+    fi
+fi
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications || true
+fi
+
+exit 0

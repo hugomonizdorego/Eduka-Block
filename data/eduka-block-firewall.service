@@ -1,0 +1,18 @@
+[Unit]
+Description=Restore Eduka-Block DNS, hosts and firewall protection
+Documentation=file:/usr/share/doc/eduka-block/README.md.gz
+DefaultDependencies=no
+After=local-fs.target NetworkManager.service
+Before=network-online.target
+Wants=NetworkManager.service
+ConditionPathExists=/var/lib/eduka-block/blocklist.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/eduka-block/eduka-block-helper apply-system
+ExecReload=/usr/lib/eduka-block/eduka-block-helper apply-system
+ExecStop=/usr/lib/eduka-block/eduka-block-helper clear-firewall
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

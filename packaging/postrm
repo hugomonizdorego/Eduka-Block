@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "purge" ]; then
+    rm -f /var/lib/eduka-block/blocklist.json
+    rm -f /var/lib/eduka-block/adult-domains.txt
+    rm -f /var/lib/eduka-block/hosts.original-backup
+    rm -f /var/lib/eduka-block/squid.conf.original-backup
+    rm -f /etc/NetworkManager/dnsmasq.d/eduka-block.conf
+    rm -f /etc/squid/eduka-block.conf
+    rm -f /etc/squid/eduka-block-keywords.txt
+    rmdir /var/lib/eduka-block 2>/dev/null || true
+    rm -f /usr/share/Eduka-Block/credentials.txt
+    rmdir /usr/share/Eduka-Block 2>/dev/null || true
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+if command -v nmcli >/dev/null 2>&1; then
+    nmcli general reload >/dev/null 2>&1 || true
+fi
+
+exit 0

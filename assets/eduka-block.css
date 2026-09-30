@@ -1,0 +1,251 @@
+/* Eduka-Block 0.4.1 — subtle soft-3D GTK design
+ * Small shadows and layered borders add depth without making controls bulky.
+ * Colours remain adaptive to Edukasaun Desktop's active GTK theme.
+ */
+
+@define-color eb_danger #d92f45;
+@define-color eb_warning #c47a16;
+
+.eduka-window,
+.auth-dialog {
+    background-color: @theme_bg_color;
+    color: @theme_fg_color;
+}
+
+.topbar {
+    background-color: @theme_base_color;
+    color: @theme_text_color;
+    border-bottom: 1px solid shade(@theme_bg_color, 0.78);
+    box-shadow: 0 2px 3px alpha(#000000, 0.14);
+}
+
+.card,
+.auth-panel,
+.form-box {
+    background-color: @theme_base_color;
+    color: @theme_text_color;
+    border: 1px solid shade(@theme_bg_color, 0.76);
+    border-radius: 7px;
+    box-shadow: 0 1px 3px alpha(#000000, 0.14);
+}
+
+.card {
+    margin: 0;
+}
+
+.protection-card {
+    background-color: @theme_base_color;
+    border: 1px solid alpha(@theme_selected_bg_color, 0.70);
+    box-shadow: 0 2px 4px alpha(#000000, 0.15);
+}
+
+.brand-box,
+.boxed-heading,
+.section-title,
+.subtitle-box,
+.field-label,
+.text-box,
+.info-box,
+.hint-box,
+.badge,
+.status-ok,
+.status-warning,
+.status-error,
+.code-box,
+.password-status {
+    border-radius: 5px;
+    padding: 3px 8px;
+}
+
+.brand-box {
+    background-color: @theme_selected_bg_color;
+    color: @theme_selected_fg_color;
+    border: 1px solid shade(@theme_selected_bg_color, 0.76);
+    box-shadow: 0 1px 2px alpha(#000000, 0.18);
+}
+
+.boxed-heading,
+.section-title {
+    background-color: alpha(@theme_selected_bg_color, 0.14);
+    color: @theme_text_color;
+    border: 1px solid alpha(@theme_selected_bg_color, 0.50);
+    box-shadow: 0 1px 2px alpha(#000000, 0.10);
+    font-weight: bold;
+}
+
+.subtitle-box,
+.field-label,
+.text-box {
+    background-color: @theme_bg_color;
+    color: @theme_fg_color;
+    border: 1px solid shade(@theme_bg_color, 0.76);
+    box-shadow: inset 0 1px 1px alpha(#ffffff, 0.10);
+}
+
+.field-label {
+    font-weight: 600;
+}
+
+.info-box,
+.hint-box {
+    background-color: alpha(@theme_selected_bg_color, 0.07);
+    color: @theme_fg_color;
+    border: 1px solid alpha(@theme_selected_bg_color, 0.30);
+    box-shadow: inset 0 1px 1px alpha(#ffffff, 0.08);
+    font-size: 0.88em;
+}
+
+.hint-box {
+    background-color: @theme_bg_color;
+    border-style: dashed;
+}
+
+.muted,
+.fine-print {
+    color: alpha(@theme_fg_color, 0.78);
+}
+
+.badge,
+.status-ok {
+    background-color: alpha(@theme_selected_bg_color, 0.13);
+    color: @theme_fg_color;
+    border: 1px solid alpha(@theme_selected_bg_color, 0.46);
+    box-shadow: 0 1px 2px alpha(#000000, 0.10);
+    font-weight: 600;
+}
+
+.status-warning {
+    background-color: alpha(@eb_warning, 0.11);
+    color: @theme_fg_color;
+    border: 1px solid alpha(@eb_warning, 0.58);
+    box-shadow: 0 1px 2px alpha(#000000, 0.09);
+    font-weight: 600;
+}
+
+.status-error,
+.blocked-summary {
+    background-color: alpha(@eb_danger, 0.10);
+    color: @eb_danger;
+    border: 1px solid alpha(@eb_danger, 0.62);
+    box-shadow: 0 1px 2px alpha(#000000, 0.10);
+    font-weight: bold;
+}
+
+button,
+entry,
+searchentry,
+combobox button {
+    border-radius: 5px;
+    border: 1px solid shade(@theme_bg_color, 0.70);
+    background-image: none;
+    min-height: 26px;
+    padding: 2px 7px;
+}
+
+button,
+combobox button {
+    background-color: @theme_base_color;
+    box-shadow: 0 1px 2px alpha(#000000, 0.16);
+}
+
+button:hover,
+combobox button:hover {
+    border-color: alpha(@theme_selected_bg_color, 0.68);
+    box-shadow: 0 2px 3px alpha(#000000, 0.16);
+}
+
+button:active,
+combobox button:active {
+    box-shadow: inset 0 1px 2px alpha(#000000, 0.16);
+}
+
+entry,
+searchentry {
+    background-color: @theme_base_color;
+    box-shadow: inset 0 1px 2px alpha(#000000, 0.10);
+}
+
+button.suggested-action {
+    background-color: @theme_selected_bg_color;
+    color: @theme_selected_fg_color;
+    border-color: shade(@theme_selected_bg_color, 0.76);
+    box-shadow: 0 1px 3px alpha(#000000, 0.20);
+    font-weight: bold;
+}
+
+button.destructive-action {
+    color: @eb_danger;
+    border-color: alpha(@eb_danger, 0.60);
+    background-color: alpha(@eb_danger, 0.07);
+}
+
+entry:focus,
+searchentry:focus,
+combobox button:focus {
+    border: 2px solid @theme_selected_bg_color;
+    box-shadow: 0 1px 3px alpha(@theme_selected_bg_color, 0.22);
+}
+
+switch {
+    border-radius: 5px;
+    box-shadow: inset 0 1px 2px alpha(#000000, 0.12);
+}
+
+switch:checked {
+    background-color: @theme_selected_bg_color;
+    color: @theme_selected_fg_color;
+}
+
+scrolledwindow {
+    border: 1px solid shade(@theme_bg_color, 0.74);
+    border-radius: 6px;
+    box-shadow: inset 0 1px 2px alpha(#000000, 0.09);
+}
+
+notebook.main-tabs {
+    border: 0;
+}
+
+notebook.main-tabs header {
+    background-color: @theme_base_color;
+    border: 1px solid shade(@theme_bg_color, 0.76);
+    border-radius: 6px;
+    padding: 2px;
+    box-shadow: 0 1px 3px alpha(#000000, 0.13);
+}
+
+notebook.main-tabs header tabs tab {
+    border-radius: 5px;
+    padding: 4px 12px;
+}
+
+notebook.main-tabs header tabs tab:checked {
+    background-color: @theme_selected_bg_color;
+    color: @theme_selected_fg_color;
+    box-shadow: 0 1px 2px alpha(#000000, 0.16);
+}
+
+.code-box {
+    background-color: @theme_bg_color;
+    color: @theme_text_color;
+    border: 1px dashed alpha(@theme_fg_color, 0.36);
+    box-shadow: inset 0 1px 2px alpha(#000000, 0.09);
+    font-family: monospace;
+    font-size: 0.88em;
+}
+
+treeview header button {
+    border-radius: 0;
+    border-width: 0 1px 1px 0;
+    box-shadow: 0 1px 2px alpha(#000000, 0.10);
+    font-weight: bold;
+}
+
+treeview:selected {
+    background-color: @theme_selected_bg_color;
+    color: @theme_selected_fg_color;
+}
+
+.auth-icon {
+    color: @theme_selected_bg_color;
+}

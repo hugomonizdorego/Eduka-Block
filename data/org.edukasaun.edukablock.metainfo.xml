@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.edukasaun.edukablock</id>
+  <name>Eduka-Block</name>
+  <summary>Intelligent multilingual web protection for Edukasaun OS</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>Eduka-Block helps parents and teachers block harmful websites, domains, subdomains, IP addresses and CIDR ranges for all users of an Edukasaun OS computer.</p>
+    <p>It combines wildcard DNS, a managed /etc/hosts section, nftables and smart IP synchronization below the browser layer.</p>
+    <p>The interface defaults to International English and includes Tetum, European Portuguese, Brazilian Portuguese and Indonesian.</p>
+  </description>
+  <launchable type="desktop-id">eduka-block.desktop</launchable>
+  <url type="homepage">https://edukasaunos.tl</url>
+  <developer id="tl.edukasaunos"><name>STI-MCAS &amp; IDEA</name></developer>
+  <releases>
+    <release version="0.4.1" date="2026-09-05">
+      <description><p>Subtle 3D interface, red blocked-rule indicators, confirmed five-character-minimum passwords, and hardened atomic nftables and localhost-only Squid configuration.</p></description>
+    </release>
+    <release version="0.4" date="2026-07-21">
+      <description><p>Compact small-screen layout, login account changes and optional Squid keyword filtering.</p></description>
+    </release>
+    <release version="0.3" date="2026-07-21">
+      <description><p>Flat boxed interface with consistent spacing and adaptive GTK theme colours.</p></description>
+    </release>
+    <release version="0.2" date="2026-07-21">
+      <description><p>Multilingual interface, adaptive GTK theme and intelligent multi-layer blocking.</p></description>
+    </release>
+    <release version="0.1" date="2026-07-21">
+      <description><p>Initial development release.</p></description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Eduka-Block
+GenericName=Parental Web Protection
+Comment=Intelligent system-wide website, domain and IP protection
+Comment[tet]=Protesaun intelijente ba website, domíniu no IP iha sistema tomak
+Comment[pt_PT]=Proteção inteligente de sites, domínios e IP em todo o sistema
+Comment[pt_BR]=Proteção inteligente de sites, domínios e IP em todo o sistema
+Comment[id]=Perlindungan cerdas website, domain, dan IP di seluruh sistem
+Exec=eduka-block
+Icon=eduka-block
+Terminal=false
+StartupNotify=true
+Categories=GTK;System;Settings;Security;
+Keywords=parental;block;domain;website;children;school;security;pornography;DNS;firewall;
+X-LXQt-Need-Tray=false

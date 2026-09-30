@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Eduka-Block smart IP protection every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+RandomizedDelaySec=2min
+Persistent=true
+Unit=eduka-block-sync.service
+
+[Install]
+WantedBy=timers.target

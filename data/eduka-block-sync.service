@@ -1,0 +1,10 @@
+[Unit]
+Description=Synchronize Eduka-Block smart domain IP addresses
+After=network-online.target eduka-block-firewall.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/eduka-block/eduka-block-helper sync-smart-ips
+Nice=10
+IOSchedulingClass=idle

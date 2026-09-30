@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>STI-MCAS &amp; IDEA</vendor>
+  <vendor_url>https://edukasaunos.tl</vendor_url>
+  <icon_name>eduka-block</icon_name>
+  <action id="org.edukasaun.edukablock.manage">
+    <description>Manage Eduka-Block system protection</description>
+    <description xml:lang="tet">Jere protesaun sistema Eduka-Block</description>
+    <description xml:lang="pt">Gerir a proteção do sistema Eduka-Block</description>
+    <description xml:lang="id">Kelola perlindungan sistem Eduka-Block</description>
+    <message>Authentication is required to change system-wide web protection</message>
+    <message xml:lang="tet">Presiza autorizasaun administradór atu troka protesaun web</message>
+    <message xml:lang="pt">É necessária autenticação para alterar a proteção web</message>
+    <message xml:lang="id">Otorisasi administrator diperlukan untuk mengubah perlindungan web</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/eduka-block/eduka-block-helper</annotate>
+  </action>
+</policyconfig>
