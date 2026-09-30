@@ -1,4 +1,4 @@
-# Security model — Eduka-Block 0.4.1
+# Security model — Eduka-Block 0.4.2
 
 Eduka-Block separates its unprivileged GTK interface from a small root helper.
 
@@ -9,7 +9,7 @@ Eduka-Block separates its unprivileged GTK interface from a small root helper.
 3. `pkexec` and the installed PolicyKit action require an administrator before the helper runs as root.
 4. The helper validates every domain, IP address, category, identifier, download URL, response size, and state schema again.
 5. It never executes a shell or incorporates unvalidated input into a command line.
-6. A root-only process lock serializes UI, boot-service, and Smart IP timer mutations.
+6. A root-only process lock (`/run/eduka-block.lock`, in the root-owned `/run` directory rather than world-writable `/run/lock`) serializes UI, boot-service, and Smart IP timer mutations. Waiting is limited to 90 seconds. Slow DNS lookups and list downloads happen before the lock is taken.
 
 The version 0.2 security engine adds a NetworkManager/dnsmasq wildcard layer and a systemd smart-IP
 timer. Both invoke the same validated helper and use fixed file paths.
@@ -38,6 +38,7 @@ It never stores the original password. New and changed accounts require two matc
 - State changes attempt rollback if hosts or firewall application fails.
 - The nftables table uses the dedicated name `inet eduka_block` and only an output chain.
 - Each nftables update is syntax-checked, then deletes/recreates the dedicated table in one `nft -f` transaction. The previous table remains active if validation fails.
+- Overlapping or adjacent addresses and ranges are merged before rendering, because nftables interval sets reject overlapping elements.
 - NetworkManager wildcard rules are generated only for validated manual domains.
 - Smart DNS resolution reads the real upstream servers exposed by NetworkManager,
   falls back only when none are available, and accepts only public A/AAAA answers.
@@ -50,6 +51,12 @@ Smart IP protection deliberately does not infer whole provider/CDN subnets. Shar
 addresses can host unrelated services, so expanding one domain to an entire subnet
 would create unsafe collateral blocking. Administrators can add a reviewed CIDR rule
 explicitly.
+
+## Import
+
+- Imported files are parsed by the unprivileged interface only to extract candidate targets; the helper validates every entry again with the same rules as a manual addition.
+- One import accepts at most 1,000 entries and a 256 KiB request. Duplicates, subdomains already covered by a blocked parent domain, and invalid lines are counted and skipped.
+- Imported domains receive smart IP addresses at the next synchronisation instead of resolving hundreds of names while the lock is held.
 
 ## Squid Proxy layer
 

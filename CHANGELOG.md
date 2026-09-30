@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.2 — 2026-09-30
+
+### Fixed
+
+- Firewall updates no longer fail when an IP address lies inside a blocked CIDR range, or when two rules overlap. nftables interval sets reject overlapping elements, which previously rolled back the whole change; overlapping and adjacent addresses are now merged before the ruleset is generated.
+- The main menu popover no longer opens by itself when the window appears.
+- The empty-list hint no longer stays visible after rules are loaded.
+- Debian 13 installs: depend on `pkexec` and `polkitd` (with `policykit-1` as an alternative for older releases); the `policykit-1` transitional package no longer exists in Debian 13.
+- The helper lock moved from world-writable `/run/lock` to root-only `/run`, so an unprivileged user can no longer pre-create or hold it to stall protection updates. Waiting for the lock now times out after 90 seconds with a clear message instead of hanging.
+- Smart IP synchronisation and adult-list downloads run their slow network work before taking the lock, so the interface is no longer blocked for minutes while the timer runs.
+- Adding and removing rules no longer freezes the window; every privileged action now runs in the background, and locking, closing or switching language is held back until it finishes.
+- Many error messages that appeared in English are now translated into Tetum, Portuguese (Portugal/Brazil) and Indonesian.
+- Styling is scoped to Eduka-Block windows so menus, file choosers and message dialogs keep the native theme.
+
+### Added
+
+- Import rules from a plain list, a previous export, or a hosts-format blocklist (up to 1,000 entries in one authorisation); export all rules to a text file.
+- Select and remove several rules at once.
+- "Sync IP addresses now" button and last-synchronisation time in the overview.
+- Sortable rule columns, a rule counter with search results, and Ctrl+F / Ctrl+L shortcuts.
+- A subdomain already covered by a blocked parent domain is reported instead of being added twice.
+- Status colours: DNS fallback and stopped Squid are shown as warnings, failed operations as errors.
+- Show/hide password buttons, a dedicated "change account" dialog, and remaining sign-in attempts.
+- Duplicate Squid keywords are reported before calling the helper; Delete removes the selected keyword.
+
+### Changed
+
+- The version number is defined once in `src/eduka_block_common.py`; `build.sh`, generated files and translations read it from there, and `Installed-Size` is calculated during the build.
+- NetworkManager is reloaded before the firewall service during installation so the first apply already uses the DNS plugin.
+- systemd services run with `NoNewPrivileges`, `PrivateTmp` and `ProtectHome`.
+
 ## 0.4.1 — 2026-09-05
 
 - Refreshed the complete GTK interface with subtle soft-3D depth, small shadows, layered borders, and theme-adaptive colours.

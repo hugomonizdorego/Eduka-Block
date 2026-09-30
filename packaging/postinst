@@ -34,6 +34,12 @@ if [ -e /usr/share/Eduka-Block/credentials.txt ]; then
     chmod 0644 /usr/share/Eduka-Block/credentials.txt
 fi
 
+# Load the dnsmasq DNS plugin setting before the firewall service applies
+# rules, so the first apply already writes and reloads wildcard DNS rules.
+if command -v nmcli >/dev/null 2>&1; then
+    nmcli general reload >/dev/null 2>&1 || true
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl enable eduka-block-firewall.service >/dev/null 2>&1 || true
@@ -41,9 +47,8 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl restart eduka-block-firewall.service >/dev/null 2>&1 || true
 fi
 
-if command -v nmcli >/dev/null 2>&1; then
-    nmcli general reload >/dev/null 2>&1 || true
-fi
+# 0.4.1 and older used /run/lock, which is world-writable.
+rm -f /run/lock/eduka-block.lock
 
 # Re-apply an existing Squid setting during upgrades so 0.4 installations gain
 # the localhost-only listener and reversible port migration immediately.

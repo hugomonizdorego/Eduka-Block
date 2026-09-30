@@ -8,3 +8,7 @@ Type=oneshot
 ExecStart=/usr/lib/eduka-block/eduka-block-helper sync-smart-ips
 Nice=10
 IOSchedulingClass=idle
+TimeoutStartSec=15min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes

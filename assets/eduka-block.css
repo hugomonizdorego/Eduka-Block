@@ -1,6 +1,8 @@
-/* Eduka-Block 0.4.1 — subtle soft-3D GTK design
+/* Eduka-Block — subtle soft-3D GTK design
  * Small shadows and layered borders add depth without making controls bulky.
  * Colours remain adaptive to Edukasaun Desktop's active GTK theme.
+ * Control rules are scoped to Eduka-Block windows so popover menus, file
+ * choosers and message dialogs keep the native theme.
  */
 
 @define-color eb_danger #d92f45;
@@ -131,10 +133,14 @@
     font-weight: bold;
 }
 
-button,
-entry,
-searchentry,
-combobox button {
+.eduka-window button,
+.auth-dialog button,
+.eduka-window entry,
+.auth-dialog entry,
+.eduka-window searchentry,
+.auth-dialog searchentry,
+.eduka-window combobox button,
+.auth-dialog combobox button {
     border-radius: 5px;
     border: 1px solid shade(@theme_bg_color, 0.70);
     background-image: none;
@@ -142,30 +148,39 @@ combobox button {
     padding: 2px 7px;
 }
 
-button,
-combobox button {
+.eduka-window button,
+.auth-dialog button,
+.eduka-window combobox button,
+.auth-dialog combobox button {
     background-color: @theme_base_color;
     box-shadow: 0 1px 2px alpha(#000000, 0.16);
 }
 
-button:hover,
-combobox button:hover {
+.eduka-window button:hover,
+.auth-dialog button:hover,
+.eduka-window combobox button:hover,
+.auth-dialog combobox button:hover {
     border-color: alpha(@theme_selected_bg_color, 0.68);
     box-shadow: 0 2px 3px alpha(#000000, 0.16);
 }
 
-button:active,
-combobox button:active {
+.eduka-window button:active,
+.auth-dialog button:active,
+.eduka-window combobox button:active,
+.auth-dialog combobox button:active {
     box-shadow: inset 0 1px 2px alpha(#000000, 0.16);
 }
 
-entry,
-searchentry {
+.eduka-window entry,
+.auth-dialog entry,
+.eduka-window searchentry,
+.auth-dialog searchentry {
     background-color: @theme_base_color;
     box-shadow: inset 0 1px 2px alpha(#000000, 0.10);
 }
 
-button.suggested-action {
+.eduka-window button.suggested-action,
+.auth-dialog button.suggested-action {
     background-color: @theme_selected_bg_color;
     color: @theme_selected_fg_color;
     border-color: shade(@theme_selected_bg_color, 0.76);
@@ -173,30 +188,37 @@ button.suggested-action {
     font-weight: bold;
 }
 
-button.destructive-action {
+.eduka-window button.destructive-action,
+.auth-dialog button.destructive-action {
     color: @eb_danger;
     border-color: alpha(@eb_danger, 0.60);
     background-color: alpha(@eb_danger, 0.07);
 }
 
-entry:focus,
-searchentry:focus,
-combobox button:focus {
+.eduka-window entry:focus,
+.auth-dialog entry:focus,
+.eduka-window searchentry:focus,
+.auth-dialog searchentry:focus,
+.eduka-window combobox button:focus,
+.auth-dialog combobox button:focus {
     border: 2px solid @theme_selected_bg_color;
     box-shadow: 0 1px 3px alpha(@theme_selected_bg_color, 0.22);
 }
 
-switch {
+.eduka-window switch,
+.auth-dialog switch {
     border-radius: 5px;
     box-shadow: inset 0 1px 2px alpha(#000000, 0.12);
 }
 
-switch:checked {
+.eduka-window switch:checked,
+.auth-dialog switch:checked {
     background-color: @theme_selected_bg_color;
     color: @theme_selected_fg_color;
 }
 
-scrolledwindow {
+.eduka-window scrolledwindow,
+.auth-dialog scrolledwindow {
     border: 1px solid shade(@theme_bg_color, 0.74);
     border-radius: 6px;
     box-shadow: inset 0 1px 2px alpha(#000000, 0.09);
@@ -234,18 +256,27 @@ notebook.main-tabs header tabs tab:checked {
     font-size: 0.88em;
 }
 
-treeview header button {
+.eduka-window treeview header button,
+.auth-dialog treeview header button {
     border-radius: 0;
     border-width: 0 1px 1px 0;
     box-shadow: 0 1px 2px alpha(#000000, 0.10);
     font-weight: bold;
 }
 
-treeview:selected {
+.eduka-window treeview:selected,
+.auth-dialog treeview:selected {
     background-color: @theme_selected_bg_color;
     color: @theme_selected_fg_color;
 }
 
 .auth-icon {
     color: @theme_selected_bg_color;
+}
+
+.eduka-window button.suggested-action:disabled,
+.auth-dialog button.suggested-action:disabled {
+    background-color: alpha(@theme_selected_bg_color, 0.45);
+    color: alpha(@theme_selected_fg_color, 0.85);
+    box-shadow: none;
 }

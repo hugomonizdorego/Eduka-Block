@@ -1,6 +1,8 @@
-# Eduka-Block 0.4.1
+# Eduka-Block 0.4.2
 
 Eduka-Block adalah aplikasi perlindungan web cerdas untuk **Edukasaun OS**. Aplikasi ini membantu orang tua dan guru memblokir situs pornografi, malware, penipuan, perjudian, media sosial, alamat IP, rentang jaringan, dan website lain yang dinilai merusak anak atau siswa.
+
+Versi 0.4.2 memperbaiki kegagalan firewall ketika IP/rentang saling tumpang tindih, dependency PolicyKit untuk Debian 13, dan lock helper yang dapat disalahgunakan pengguna biasa. Versi ini juga menambahkan **impor/ekspor aturan**, penghapusan banyak aturan sekaligus, tombol **Sinkronkan IP sekarang**, kolom yang dapat diurutkan, antarmuka yang tidak lagi membeku saat bekerja, dan terjemahan lengkap untuk semua pesan. Rincian ada di `CHANGELOG.md`.
 
 Patch 0.4.1 memperbarui antarmuka menjadi **soft 3D** yang ringan: kedalaman dibuat dengan bayangan kecil dan border bertingkat tanpa membuat kartu atau tombol terlihat menonjol berlebihan. Daftar aturan kini memberi setiap website/IP aktif tanda merah **● DIBLOKIR**. Mesin DNS, hosts, nftables, Smart IP, dan Squid dari 0.4 tetap dipertahankan serta diperkeras.
 
@@ -16,7 +18,7 @@ Bahasa default adalah **English (International)**. Pilihan bahasa tersedia langs
 
 Pilihan disimpan per pengguna Linux di `~/.config/eduka-block/settings.json` dan dapat diganti tanpa menginstal ulang aplikasi.
 
-## Desain soft 3D versi 0.4.1
+## Desain soft 3D
 
 - Tidak memakai gradient atau bayangan berat; kedalaman menggunakan shadow 1–4 px yang lembut.
 - Kartu, bidang formulir, judul, keterangan, hint, status, dan catatan memiliki kotak yang rapi.
@@ -48,6 +50,12 @@ Pilihan disimpan per pengguna Linux di `~/.config/eduka-block/settings.json` dan
 - Port Squid yang dikelola hanya terikat ke `127.0.0.1:3128`; listener default dipulihkan ketika fitur dinonaktifkan.
 - Kategori manual, pencarian, status cakupan, jumlah IP terlacak, auto-lock 10 menit, dan PolicyKit.
 - Migrasi otomatis database versi lama ke schema versi 3 tanpa menghapus daftar atau pengaturan lama.
+- **Impor aturan** dari daftar teks biasa, file ekspor Eduka-Block, atau blocklist format hosts (`0.0.0.0 domain`) — maksimal 1.000 entri dengan satu otorisasi.
+- **Ekspor aturan** ke file teks (`domain  # Kategori`) untuk dipindahkan ke komputer lain.
+- Pilih dan hapus beberapa aturan sekaligus (Ctrl/Shift + klik, lalu **Hapus yang Dipilih** atau tombol Delete).
+- Tombol **Sinkronkan alamat IP sekarang** dan waktu sinkronisasi terakhir di kartu ringkasan.
+- Subdomain yang sudah tercakup domain induk yang diblokir (misalnya `video.example.org` saat `example.org` sudah diblokir) langsung diberi tahu, tidak ditambahkan dua kali.
+- Pintasan keyboard: **Ctrl+F** mencari aturan, **Ctrl+L** mengunci aplikasi.
 
 ## Perlindungan lintas browser
 
@@ -89,16 +97,16 @@ Browser yang memakai tab Squid harus dikonfigurasi menggunakan proxy HTTP dan HT
 Gunakan APT agar seluruh dependency diunduh otomatis:
 
 ```bash
-sudo apt install ./eduka-block_0.4.1-1_all.deb
+sudo apt install ./eduka-block_0.4.2-1_all.deb
 ```
 
-Jika versi 0.1 sudah terpasang, perintah yang sama meng-upgrade aplikasi dan mempertahankan akun serta daftar blokir.
+Jika versi lama (0.1–0.4.1) sudah terpasang, perintah yang sama meng-upgrade aplikasi dan mempertahankan akun serta daftar blokir.
 
 Dependency utama:
 
 - `python3`, `python3-gi`, `python3-dnspython`
 - `gir1.2-gtk-3.0`
-- `policykit-1`
+- `pkexec` dan `polkitd` (atau `policykit-1` pada rilis Debian lama)
 - `nftables`
 - `network-manager`, `dnsmasq-base`
 - `squid`
@@ -133,7 +141,8 @@ NetworkManager mendukung plugin `dnsmasq` dan konfigurasi tambahan di `/etc/Netw
 - Helper root hanya menerima JSON terbatas, memvalidasi ulang input, dan tidak menjalankan shell.
 - `/etc/hosts`, database, dan konfigurasi DNS ditulis secara atomik.
 - Perubahan nftables diperiksa lebih dahulu dan mengganti tabel `inet eduka_block` dalam satu transaksi atomik, sehingga tidak ada jeda perlindungan ketika rule diperbarui.
-- Lock proses mencegah timer Smart IP, service boot, dan perubahan UI menulis state secara bersamaan.
+- Lock proses di `/run/eduka-block.lock` (direktori milik root, bukan `/run/lock` yang dapat ditulis semua pengguna) mencegah timer Smart IP, service boot, dan perubahan UI menulis state secara bersamaan. Menunggu lock dibatasi 90 detik; DNS lookup dan unduhan daftar dilakukan sebelum lock diambil.
+- IP dan rentang yang saling tumpang tindih digabung sebelum dimasukkan ke nftables sehingga penerapan firewall tidak gagal.
 - Kata Squid dibatasi pada data literal 2–40 karakter dan diubah menjadi pola aman oleh helper; pengguna tidak dapat menyuntikkan directive atau regex mentah.
 - Include Squid disisipkan sebelum allow rule, konfigurasi diperiksa dengan `squid -k parse`, dan perubahan memiliki rollback.
 - Transaksi rollback mengembalikan state sebelumnya jika penerapan gagal.
@@ -146,15 +155,22 @@ NetworkManager mendukung plugin `dnsmasq` dan konfigurasi tambahan di `/etc/Netw
 ## Build dan test
 
 ```bash
-chmod +x build.sh
 ./build.sh
 python3 -m unittest discover -s tests -v
+```
+
+Versi aplikasi hanya didefinisikan di `src/eduka_block_common.py` (`APP_VERSION`); `build.sh` membacanya dan menghitung `Installed-Size` secara otomatis. Revisi paket dapat diganti dengan `PACKAGE_REVISION=2 ./build.sh`.
+
+Untuk mencoba antarmuka langsung dari source checkout (helper tetap harus terpasang di `/usr/lib/eduka-block`):
+
+```bash
+python3 src/eduka_block.py
 ```
 
 Hasil build:
 
 ```text
-dist/eduka-block_0.4.1-1_all.deb
+dist/eduka-block_0.4.2-1_all.deb
 ```
 
 ## Menghapus aplikasi
@@ -172,12 +188,12 @@ sudo apt purge eduka-block
 ## Proyek
 
 - Nama: **Eduka-Block**
-- Versi aplikasi: **0.4.1**
-- Versi paket: **0.4.1-1**
+- Versi aplikasi: **0.4.2**
+- Versi paket: **0.4.2-1**
 - Target: Edukasaun OS berbasis Debian 13 dan Eduka-Desktop/LXQt
 - Developer: **STI-MCAS & IDEA**
 - Project lead: **Hugo Moniz do Rego**
 - Website: <https://edukasaunos.tl>
 - Lisensi: GPL-3.0-or-later
 
-Eduka-Block masih terus dikembangkan. Fitur masa depan dapat mencakup whitelist, jadwal, profil per pengguna, laporan percobaan akses, mode sekolah terpusat, impor/ekspor, dan pembaruan blocklist terjadwal.
+Eduka-Block masih terus dikembangkan. Fitur masa depan dapat mencakup whitelist, jadwal, profil per pengguna, laporan percobaan akses, mode sekolah terpusat, preset kategori (media sosial/perjudian), dan pembaruan blocklist terjadwal.

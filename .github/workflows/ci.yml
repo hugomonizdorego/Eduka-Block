@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile sources
+        run: python3 -m py_compile src/*.py tests/*.py
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Check maintainer scripts
+        run: for script in packaging/postinst packaging/prerm packaging/postrm build.sh; do sh -n "$script"; done
+      - name: Build Debian package
+        run: ./build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eduka-block-deb
+          path: dist/*.deb

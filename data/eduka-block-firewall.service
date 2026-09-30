@@ -13,6 +13,9 @@ ExecStart=/usr/lib/eduka-block/eduka-block-helper apply-system
 ExecReload=/usr/lib/eduka-block/eduka-block-helper apply-system
 ExecStop=/usr/lib/eduka-block/eduka-block-helper clear-firewall
 RemainAfterExit=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
 
 [Install]
 WantedBy=multi-user.target

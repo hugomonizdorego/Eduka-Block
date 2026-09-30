@@ -1,16 +1,17 @@
 Package: eduka-block
-Version: 0.4.1-1
+Version: @VERSION@
 Section: admin
 Priority: optional
 Architecture: all
 Maintainer: STI-MCAS & IDEA <grupoideatl@gmail.com>
-Depends: python3 (>= 3.11), python3-gi, python3-dnspython, gir1.2-gtk-3.0, policykit-1, nftables, ca-certificates, network-manager, dnsmasq-base, squid
+Depends: python3 (>= 3.11), python3-gi, python3-dnspython, gir1.2-gtk-3.0, pkexec | policykit-1, polkitd | policykit-1, nftables, ca-certificates, network-manager, dnsmasq-base, squid
 Recommends: lxqt-policykit
-Installed-Size: 430
+Installed-Size: @INSTALLED_SIZE@
 Homepage: https://edukasaunos.tl
 Description: multilingual web and Squid protection for Edukasaun OS
  Eduka-Block is a lightweight GTK application for parents and teachers.
  Its subtle 3D, theme-adaptive GTK interface combines wildcard DNS, a managed
- /etc/hosts section, persistent nftables rules and periodic smart IP
- synchronization and optional Squid keyword ACLs. The interface includes English,
- Tetum, European and Brazilian Portuguese, and Indonesian.
+ /etc/hosts section, persistent nftables rules, periodic smart IP
+ synchronization and optional Squid keyword ACLs. Rules can be imported from
+ plain lists or hosts files and exported for other computers. The interface
+ includes English, Tetum, European and Brazilian Portuguese, and Indonesian.
