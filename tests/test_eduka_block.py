@@ -86,6 +86,8 @@ class SandboxTestCase(unittest.TestCase):
             "FIREFOX_POLICY_BACKUP_PATH": self.root / "state" / "firefox.backup.json",
             "CHROMIUM_POLICY_DIRS": self.chromium_dirs,
             "LOCK_PATH": self.root / "eduka-block.lock",
+            "APP_SHARE_DIR": self.root / "share",
+            "CREDENTIALS_PATH": self.root / "share" / "credentials.txt",
         }
         stubs = {
             "require_root": lambda: None,
@@ -360,7 +362,7 @@ class InterfaceDesignTests(SandboxTestCase):
         css = (SOURCE.parent / "assets" / "eduka-block.css").read_text(encoding="utf-8")
         interface = (SOURCE / "eduka_block.py").read_text(encoding="utf-8")
 
-        self.assertEqual(APP_VERSION, "0.5.0")
+        self.assertEqual(APP_VERSION, "0.5.1")
         for selector in (".sidebar", ".nav-button", ".hero", ".card", ".toggle-row", ".toast", ".pill", ".chip"):
             with self.subTest(selector=selector):
                 self.assertIn(selector, css)
@@ -748,6 +750,43 @@ class ProtectionLayerTests(SandboxTestCase):
         self.assertEqual(helper.detect_dns_mode(), "hosts")
         self.resolv.write_text("nameserver 127.0.0.1\n", encoding="utf-8")
         self.assertEqual(helper.detect_dns_mode(), "dnsmasq")
+
+
+class AccountRecoveryTests(SandboxTestCase):
+    def test_account_info_reveals_username_only_to_root(self):
+        self.assertEqual(helper.account_info(), {"username": ""})
+        helper.setup_credentials({"username": "Profesór Ana", "password": "abcde"})
+        self.assertEqual(helper.account_info(), {"username": "Profesór Ana"})
+        self.assertNotIn("abcde", helper.CREDENTIALS_PATH.read_text(encoding="utf-8"))
+        with patch.object(helper, "require_root", side_effect=HelperError("err_root")):
+            with self.assertRaises(HelperError):
+                helper.account_info()
+
+    def test_reset_replaces_password_and_keeps_rules(self):
+        state = default_state()
+        state["entries"] = [{"id": "x", "value": "bad.example", "kind": "domain", "smart": False}]
+        save_state(state)
+        helper.setup_credentials({"username": "teacher", "password": "old-pass"})
+        helper.dispatch("change-credentials", {"username": "teacher", "password": "new-pass"})
+        self.assertTrue(verify_credentials("teacher", "new-pass", helper.CREDENTIALS_PATH))
+        self.assertFalse(verify_credentials("teacher", "old-pass", helper.CREDENTIALS_PATH))
+        self.assertEqual(load_state()["entries"][0]["value"], "bad.example")
+        self.assertEqual(
+            helper.dispatch("account-info", {})["account"], {"username": "teacher"}
+        )
+
+    def test_terminal_reset_tool(self):
+        import eduka_block_reset as reset
+
+        path = self.root / "share" / "credentials.txt"
+        reset.write_credentials("guru", "secret", path)
+        self.assertEqual(reset.stored_username(path), "guru")
+        self.assertTrue(verify_credentials("guru", "secret", path))
+        self.assertEqual(oct(path.stat().st_mode & 0o777), "0o644")
+        with self.assertRaises(ValidationError):
+            reset.write_credentials("guru", "1234", path)
+        with patch.object(reset.os, "geteuid", return_value=1000):
+            self.assertEqual(reset.main(["--show-username"]), 1)
 
 
 class LockTests(SandboxTestCase):

@@ -42,6 +42,7 @@ from eduka_block_i18n import LANGUAGES, load_language, save_language, tr  # noqa
 
 HELPER = "/usr/lib/eduka-block/eduka-block-helper"
 ICON = "/usr/share/icons/hicolor/scalable/apps/eduka-block.svg"
+LOGO = "/usr/share/eduka-block/eduka-block-logo.svg"
 CSS = "/usr/share/eduka-block/eduka-block.css"
 CONFIG_PATH = Path.home() / ".config" / "eduka-block" / "settings.json"
 AUTO_LOCK_SECONDS = 600
@@ -50,6 +51,7 @@ MAX_IMPORT_ITEMS = 1000
 MAX_IMPORT_FILE_BYTES = 2 * 1024 * 1024
 TOAST_SECONDS = 4
 RESPONSE_CHANGE_ACCOUNT = 1001
+RESPONSE_FORGOT = 1002
 CURRENT_LANGUAGE = load_language(CONFIG_PATH)
 
 # Seconds allowed per helper action. The helper may wait up to 90 s for the
@@ -187,9 +189,13 @@ def icon(name: str, size: int, *classes: str) -> Gtk.Image:
     return add_classes(image, *classes)
 
 
-def logo_image(size: int) -> Gtk.Image:
-    """The application logo scaled to ``size`` pixels (SVGs load at full size otherwise)."""
-    for candidate in (Path(ICON), SOURCE_DIR.parent / "assets" / "eduka-block.svg"):
+def logo_image(size: int, mark: bool = False) -> Gtk.Image:
+    """The app icon (or, with ``mark``, the bare logo) scaled to ``size`` pixels.
+
+    SVGs would otherwise load at their full 256 px size.
+    """
+    installed, source = (LOGO, "eduka-block-logo.svg") if mark else (ICON, "eduka-block.svg")
+    for candidate in (SOURCE_DIR.parent / "assets" / source, Path(installed)):
         if candidate.exists():
             try:
                 pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(candidate), size, size, True)
@@ -297,7 +303,8 @@ def recommended_active(status: dict) -> bool:
 
 
 class AccountDialog(Gtk.Dialog):
-    """Login ("login"), first-run ("setup") or account replacement ("change")."""
+    """Sign-in ("login"), first run ("setup"), account change ("change") or
+    recovery after a forgotten username/password ("reset")."""
 
     def __init__(self, mode: str, parent: Gtk.Window | None = None):
         super().__init__(transient_for=parent, modal=True)
@@ -332,7 +339,7 @@ class AccountDialog(Gtk.Dialog):
         top.pack_end(self.language_combo, False, False, 0)
         panel.pack_start(top, False, False, 0)
 
-        logo = add_classes(logo_image(72), "auth-logo")
+        logo = add_classes(logo_image(84, mark=True), "auth-logo")
         panel.pack_start(logo, False, False, 4)
         self.heading = label("", "auth-title", xalign=0.5)
         panel.pack_start(self.heading, False, False, 0)
@@ -350,6 +357,14 @@ class AccountDialog(Gtk.Dialog):
         panel.pack_start(self.password_label, False, False, 0)
         self.password = self.password_entry()
         panel.pack_start(self.password, False, False, 0)
+        self.forgot_button = None
+        if mode == "login":
+            self.forgot_button = Gtk.Button()
+            self.forgot_button.set_relief(Gtk.ReliefStyle.NONE)
+            self.forgot_button.set_halign(Gtk.Align.END)
+            add_classes(self.forgot_button, "link-button")
+            self.forgot_button.connect("clicked", lambda *_: self.response(RESPONSE_FORGOT))
+            panel.pack_start(self.forgot_button, False, False, 0)
         self.confirm_label = None
         self.confirm_password = None
         self.password_status = None
@@ -381,14 +396,26 @@ class AccountDialog(Gtk.Dialog):
         return entry
 
     def update_text(self) -> None:
-        titles = {"setup": "setup_title", "login": "login_title", "change": "change_account_title"}
-        notes = {"setup": "setup_note", "login": "login_note", "change": "change_account_note"}
-        actions = {"setup": "create_account", "login": "sign_in", "change": "save_account"}
+        titles = {
+            "setup": "setup_title",
+            "login": "login_title",
+            "change": "change_account_title",
+            "reset": "reset_title",
+        }
+        notes = {
+            "setup": "setup_note",
+            "login": "login_note",
+            "change": "change_account_note",
+            "reset": "reset_note",
+        }
+        actions = {"setup": "create_account", "login": "sign_in", "change": "save_account", "reset": "save_account"}
         self.set_title("Eduka-Block")
         self.cancel_button.set_label(T("cancel"))
         self.action_button.set_label(T(actions[self.mode]))
         if self.change_button:
             self.change_button.set_label(T("change_account"))
+        if self.forgot_button:
+            self.forgot_button.set_label(T("forgot_link"))
         self.heading.set_text(T(titles[self.mode]))
         self.note.set_text(T(notes[self.mode]))
         self.username_label.set_text(T("username"))
@@ -442,9 +469,14 @@ class AccountDialog(Gtk.Dialog):
         )
 
 
-def run_account_change(parent: Gtk.Window | None) -> str | None:
-    """Show the change-account dialog; return the new username once saved."""
-    dialog = AccountDialog("change", parent=parent)
+def run_account_change(
+    parent: Gtk.Window | None, mode: str = "change", username: str = ""
+) -> str | None:
+    """Show the change/reset account dialog; return the new username once saved."""
+    dialog = AccountDialog(mode, parent=parent)
+    if username:
+        dialog.username.set_text(username)
+        dialog.password.grab_focus()
     try:
         while dialog.run() == Gtk.ResponseType.OK:
             username, password = dialog.values()
@@ -1402,6 +1434,21 @@ class MainWindow(Gtk.Window):
         self.destroy()
 
 
+def recover_account(parent: Gtk.Window) -> str | None:
+    """Forgotten username or password: the operating-system administrator
+    password (PolicyKit) proves the right to recover the account. The helper
+    reveals the stored username, then a new password is saved. Protection
+    rules are not touched."""
+    if not confirm(parent, T("forgot_title"), T("forgot_body"), "forgot_continue"):
+        return None
+    try:
+        account = helper_call("account-info", privileged=True).get("account", {})
+    except AppError as exc:
+        message(parent, T("forgot_failed_title"), str(exc) + "\n\n" + T("forgot_cli_hint"), error=True)
+        return None
+    return run_account_change(parent, mode="reset", username=account.get("username", ""))
+
+
 def create_first_account() -> dict | None:
     dialog = AccountDialog("setup")
     try:
@@ -1441,6 +1488,15 @@ def authenticate() -> dict | None:
         if response in {Gtk.ResponseType.CANCEL, Gtk.ResponseType.DELETE_EVENT}:
             dialog.destroy()
             return None
+        if response == RESPONSE_FORGOT:
+            recovered = recover_account(dialog)
+            dialog.password.set_text("")
+            if recovered:
+                attempts = 0
+                dialog.username.set_text(recovered)
+                message(dialog, T("account_reset_title"), T("account_reset_body", username=recovered))
+            dialog.password.grab_focus()
+            continue
         if response not in {Gtk.ResponseType.OK, RESPONSE_CHANGE_ACCOUNT}:
             continue
         username, password = dialog.values()
@@ -1464,7 +1520,9 @@ def authenticate() -> dict | None:
             message(
                 dialog,
                 T("login_failed_title"),
-                T("login_failed_body") + "\n" + T("attempts_left", count=remaining),
+                "\n".join(
+                    (T("login_failed_body"), T("attempts_left", count=remaining), T("login_forgot_hint"))
+                ),
                 error=True,
             )
             dialog.password.grab_focus()

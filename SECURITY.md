@@ -1,4 +1,4 @@
-# Security model — Eduka-Block 0.5.0
+# Security model — Eduka-Block 0.5.1
 
 Eduka-Block separates its unprivileged GTK interface from a small root helper.
 
@@ -17,6 +17,13 @@ timer. Both invoke the same validated helper and use fixed file paths.
 The application password protects the interface from casual access. PolicyKit and the operating-system administrator account provide the actual privilege boundary. Someone who knows the root/administrator password can always remove or bypass local parental-control software.
 
 Changing the account from the login screen first verifies the current username and password. Writing the replacement credential file additionally requires PolicyKit administrator authorisation.
+
+## Account recovery
+
+- The Eduka-Block account only guards the interface; the operating-system administrator password is the real boundary. Recovery therefore requires that password and nothing else.
+- On the sign-in screen, *Forgot username or password?* runs the helper action `account-info` through pkexec. Only root can read the username that way; the password itself is never recoverable. A new password is then saved with `change-credentials`, which needs the same authorisation.
+- `eduka-block-reset` refuses to run without root and writes the credential file atomically with mode 0644.
+- Recovery never changes protection rules, lists or strict mode.
 
 ## Credentials
 

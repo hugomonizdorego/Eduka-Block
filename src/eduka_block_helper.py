@@ -32,6 +32,7 @@ from eduka_block_common import (
     aliases_for_domain,
     create_credentials_text,
     normalize_target,
+    read_credentials,
     rule_target,
 )
 from eduka_block_data import (
@@ -1193,6 +1194,21 @@ def public_status() -> dict:
     }
 
 
+def account_info() -> dict:
+    """Return the stored parent/teacher username for account recovery.
+
+    Only reachable through pkexec (root): proving the operating-system
+    administrator password is what entitles someone to recover the account.
+    """
+    require_root()
+    if not credentials_configured():
+        return {"username": ""}
+    try:
+        return {"username": read_credentials(CREDENTIALS_PATH)["username"]}
+    except ValidationError:
+        return {"username": ""}  # Damaged file: the account can still be replaced.
+
+
 def setup_credentials(payload: dict, replace: bool = False) -> None:
     require_root()
     if credentials_configured() and not replace:
@@ -1455,6 +1471,8 @@ def dispatch(action: str, payload: dict, prepared: object = None) -> dict:
         setup_credentials(payload, replace=False)
     elif action == "change-credentials":
         setup_credentials(payload, replace=True)
+    elif action == "account-info":
+        extra["account"] = account_info()
     elif action == "add":
         add_entry(payload)
     elif action == "import":

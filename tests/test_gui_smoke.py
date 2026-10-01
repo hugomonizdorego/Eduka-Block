@@ -87,5 +87,35 @@ class MainWindowSmokeTests(unittest.TestCase):
         self.assertTrue(window.toast_revealer.get_reveal_child())
 
 
+@unittest.skipUnless(GTK_READY, "GTK 3 with a display is not available")
+class AccountDialogSmokeTests(unittest.TestCase):
+    def setUp(self):
+        import eduka_block
+
+        self.ui = eduka_block
+        self.ui.CURRENT_LANGUAGE = "en"
+
+    def test_login_offers_account_recovery(self):
+        dialog = self.ui.AccountDialog("login")
+        self.addCleanup(dialog.destroy)
+        self.assertEqual(dialog.forgot_button.get_label(), self.ui.T("forgot_link"))
+        responses = []
+        dialog.connect("response", lambda _dialog, response: responses.append(response))
+        dialog.forgot_button.clicked()
+        self.assertEqual(responses, [self.ui.RESPONSE_FORGOT])
+
+    def test_reset_dialog_requires_matching_new_password(self):
+        dialog = self.ui.AccountDialog("reset")
+        self.addCleanup(dialog.destroy)
+        self.assertIsNone(dialog.forgot_button)
+        self.assertEqual(dialog.heading.get_text(), self.ui.T("reset_title"))
+        dialog.username.set_text("teacher")
+        dialog.password.set_text("secret1")
+        dialog.confirm_password.set_text("secret2")
+        self.assertFalse(dialog.action_button.get_sensitive())
+        dialog.confirm_password.set_text("secret1")
+        self.assertTrue(dialog.action_button.get_sensitive())
+
+
 if __name__ == "__main__":
     unittest.main()

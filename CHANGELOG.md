@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 — 2026-10-01
+
+### Added
+
+- Official Eduka-Block logo: a shield holding an open book, crossed by a check mark. It ships as the app icon (white rounded tile, `hicolor/scalable/apps/eduka-block.svg`) and as a bare mark for the sign-in screen (`/usr/share/eduka-block/eduka-block-logo.svg`). The interface accent colours now follow the logo's blue and green.
+- Account recovery: **Forgot username or password?** on the sign-in screen. The administrator password (PolicyKit) reveals the stored username through the new helper action `account-info`, then a new password is saved. Protection rules are not touched.
+- `eduka-block-reset` terminal tool (`/usr/sbin`, root only): show the username, set a new password, or remove the account.
+- A failed sign-in now points to the recovery option.
+
+### Fixed
+
+- Installing the package inside an image builder (Cubic, live-build, debootstrap chroot) no longer tries to restart services or reload NetworkManager. A chroot can share the host's `/run` and D-Bus, so those commands could act on the host. Units are still enabled, and protection starts at the image's first boot. Detection uses `ischroot` from debianutils.
+
 ## 0.5.0 — 2026-10-01
 
 ### Interface

@@ -256,6 +256,17 @@ EN = {
     "err_list_large": "The downloaded blocklist is too large.",
     "err_list_encoding": "The downloaded blocklist has an invalid encoding.",
     "err_browser_policy": "A browser policy file is not valid JSON: {detail}",
+    "forgot_link": "Forgot username or password?",
+    "forgot_title": "Recover the Eduka-Block account",
+    "forgot_body": "You can see the username and set a new password if you know this computer's administrator (sudo) password. Protection rules are not changed.",
+    "forgot_continue": "Continue as administrator",
+    "forgot_failed_title": "Account recovery was not authorised",
+    "forgot_cli_hint": "The computer's administrator can also recover the account in a terminal:\nsudo eduka-block-reset",
+    "reset_title": "Set a new password",
+    "reset_note": "Administrator verified. Keep or change the username and choose a new password.",
+    "account_reset_title": "Account recovered",
+    "account_reset_body": "Sign in as “{username}” with the new password.",
+    "login_forgot_hint": "Forgot them? Use “Forgot username or password?” below the password field.",
 }
 
 TET = {
@@ -490,6 +501,17 @@ TET = {
     "err_list_large": "Lista blokeiu boot liu.",
     "err_list_encoding": "Lista blokeiu iha kodifikasaun la válidu.",
     "err_browser_policy": "Ficheiru polítika browser la'ós JSON válidu: {detail}",
+    "forgot_link": "Haluha naran-utilizadór ka liafuan-xave?",
+    "forgot_title": "Rekupera konta Eduka-Block",
+    "forgot_body": "Ita bele haree naran-utilizadór no hili liafuan-xave foun se ita hatene liafuan-xave administradór (sudo) komputadór ne'e nian. Regra protesaun la troka.",
+    "forgot_continue": "Kontinua hanesan administradór",
+    "forgot_failed_title": "Rekuperasaun konta la autorizadu",
+    "forgot_cli_hint": "Administradór komputadór mós bele rekupera konta iha terminal:\nsudo eduka-block-reset",
+    "reset_title": "Hili liafuan-xave foun",
+    "reset_note": "Administradór verifika ona. Mantein ka troka naran-utilizadór no hili liafuan-xave foun.",
+    "account_reset_title": "Konta rekupera ona",
+    "account_reset_body": "Tama hanesan “{username}” ho liafuan-xave foun.",
+    "login_forgot_hint": "Haluha? Uza “Haluha naran-utilizadór ka liafuan-xave?” iha liafuan-xave nia okos.",
 }
 
 PT_PT = {
@@ -724,6 +746,17 @@ PT_PT = {
     "err_list_large": "A lista de bloqueio transferida é demasiado grande.",
     "err_list_encoding": "A lista de bloqueio transferida tem uma codificação inválida.",
     "err_browser_policy": "Um ficheiro de políticas do navegador não é JSON válido: {detail}",
+    "forgot_link": "Esqueceu o nome de utilizador ou a palavra-passe?",
+    "forgot_title": "Recuperar a conta do Eduka-Block",
+    "forgot_body": "Pode ver o nome de utilizador e definir uma nova palavra-passe se souber a palavra-passe de administrador (sudo) deste computador. As regras de proteção não são alteradas.",
+    "forgot_continue": "Continuar como administrador",
+    "forgot_failed_title": "A recuperação da conta não foi autorizada",
+    "forgot_cli_hint": "O administrador do computador também pode recuperar a conta num terminal:\nsudo eduka-block-reset",
+    "reset_title": "Definir uma nova palavra-passe",
+    "reset_note": "Administrador verificado. Mantenha ou altere o nome de utilizador e escolha uma nova palavra-passe.",
+    "account_reset_title": "Conta recuperada",
+    "account_reset_body": "Entre como “{username}” com a nova palavra-passe.",
+    "login_forgot_hint": "Esqueceu-se? Use “Esqueceu o nome de utilizador ou a palavra-passe?” por baixo da palavra-passe.",
 }
 
 PT_BR = {
@@ -803,6 +836,12 @@ PT_BR = {
     "err_list_large": "A lista de bloqueio baixada é grande demais.",
     "err_list_encoding": "A lista de bloqueio baixada tem uma codificação inválida.",
     "err_browser_policy": "Um arquivo de políticas do navegador não é JSON válido: {detail}",
+    "forgot_link": "Esqueceu o nome de usuário ou a senha?",
+    "forgot_body": "Você pode ver o nome de usuário e definir uma nova senha se souber a senha de administrador (sudo) deste computador. As regras de proteção não são alteradas.",
+    "reset_title": "Definir uma nova senha",
+    "reset_note": "Administrador verificado. Mantenha ou altere o nome de usuário e escolha uma nova senha.",
+    "account_reset_body": "Entre como “{username}” com a nova senha.",
+    "login_forgot_hint": "Esqueceu? Use “Esqueceu o nome de usuário ou a senha?” abaixo da senha.",
 }
 
 ID = {
@@ -1037,6 +1076,17 @@ ID = {
     "err_list_large": "Daftar blokir yang diunduh terlalu besar.",
     "err_list_encoding": "Daftar blokir yang diunduh memiliki encoding tidak valid.",
     "err_browser_policy": "File kebijakan browser bukan JSON yang valid: {detail}",
+    "forgot_link": "Lupa username atau password?",
+    "forgot_title": "Pulihkan akun Eduka-Block",
+    "forgot_body": "Anda dapat melihat username dan membuat password baru jika mengetahui password administrator (sudo) komputer ini. Aturan perlindungan tidak berubah.",
+    "forgot_continue": "Lanjutkan sebagai administrator",
+    "forgot_failed_title": "Pemulihan akun tidak diizinkan",
+    "forgot_cli_hint": "Administrator komputer juga dapat memulihkan akun lewat terminal:\nsudo eduka-block-reset",
+    "reset_title": "Buat password baru",
+    "reset_note": "Administrator terverifikasi. Pertahankan atau ganti username, lalu pilih password baru.",
+    "account_reset_title": "Akun berhasil dipulihkan",
+    "account_reset_body": "Masuk sebagai “{username}” dengan password baru.",
+    "login_forgot_hint": "Lupa? Gunakan “Lupa username atau password?” di bawah kolom password.",
 }
 
 TRANSLATIONS = {"en": EN, "tet": TET, "pt_PT": PT_PT, "pt_BR": PT_BR, "id": ID}

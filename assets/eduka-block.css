@@ -1,17 +1,17 @@
 /* Eduka-Block — modern GTK 3 design
  *
- * A dark sidebar with the brand teal from the logo, rounded cards with soft
+ * A dark sidebar with the brand blue and green from the logo, rounded cards with soft
  * shadows and clear status colours. Page and card colours still come from the
  * active GTK theme, so light and dark desktop themes both stay readable.
  * Every rule is scoped to Eduka-Block windows; popovers, file choosers and
  * message dialogs keep the native theme.
  */
 
-@define-color eb_accent #0d9488;
-@define-color eb_accent_dark #0f766e;
+@define-color eb_accent #0b5cad;
+@define-color eb_accent_dark #094a8c;
 @define-color eb_sidebar #0f1e2d;
 @define-color eb_sidebar_fg #d5e3ec;
-@define-color eb_success #059669;
+@define-color eb_success #23963a;
 @define-color eb_warning #d97706;
 @define-color eb_danger #dc2626;
 
@@ -439,6 +439,21 @@
 .auth-dialog .dialog-action-box,
 .auth-dialog .dialog-action-area {
     margin: 4px 22px 18px 22px;
+}
+
+.auth-dialog .link-button {
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: @eb_accent;
+    padding: 2px 0;
+    min-height: 0;
+    font-size: 9.5pt;
+}
+
+.auth-dialog .link-button:hover {
+    color: @eb_accent_dark;
+    text-decoration: underline;
 }
 
 .auth-dialog .field-label {

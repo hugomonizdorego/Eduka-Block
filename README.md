@@ -1,8 +1,16 @@
-# Eduka-Block 0.5.0
+<p align="center"><img src="docs/logo.png" width="128" alt="Eduka-Block logo"></p>
+
+# Eduka-Block 0.5.1
 
 Eduka-Block is the parental and school web-protection app for **Edukasaun OS**. Parents and teachers use it to block pornography, gambling, malware, scams, social media and any other website, domain, IP address or network range that is harmful to children and students. It works for every user and every normal browser on the computer.
 
 ![Dashboard](docs/screenshots/dashboard.png)
+
+## What's new in 0.5.1
+
+- **Official logo**: a shield (protection) holding an open book (education), crossed by a green check (safe browsing). The interface now uses the logo's blue and green.
+- **Forgot username or password?** on the sign-in screen, and the `sudo eduka-block-reset` terminal tool (see [Forgotten username or password](#forgotten-username-or-password)).
+- **Image builders**: installing the `.deb` in Cubic or any chroot only prepares the system; protection starts at the image's first boot (see [Installing in Cubic](#installing-in-edukasaun-os-with-cubic)).
 
 ## What's new in 0.5.0
 
@@ -24,7 +32,8 @@ Eduka-Block is the parental and school web-protection app for **Edukasaun OS**. 
 | **Websites** | **Advanced** |
 | ![Websites](docs/screenshots/websites.png) | ![Advanced](docs/screenshots/advanced.png) |
 
-![Sign-in](docs/screenshots/sign-in.png)
+| **Sign-in** | **Account recovery** |
+| ![Sign-in](docs/screenshots/sign-in.png) | ![Account recovery](docs/screenshots/account-recovery.png) |
 
 ## How the protection works
 
@@ -55,27 +64,73 @@ No local filter can be 100% bulletproof against someone who has the administrato
 
 The app locks itself after 10 minutes without activity (**Ctrl+L** locks it immediately; **Ctrl+F** searches the rules). Every change asks for the operating-system administrator password through PolicyKit.
 
+## Forgotten username or password
+
+The Eduka-Block account protects the app from children and students. The real security boundary is the computer's **administrator (sudo) password**: every change to the protection already needs it. So whoever knows the administrator password can recover the Eduka-Block account. Protection rules are never changed by a recovery.
+
+**On the sign-in screen**
+
+1. Click **Forgot username or password?**
+2. Choose **Continue as administrator** and enter the computer's administrator password in the system prompt.
+3. Eduka-Block shows the stored username. Keep or change it, type a new password twice, and click **Save Account**.
+
+**In a terminal** (also over SSH, or when the graphical prompt is not available)
+
+```bash
+sudo eduka-block-reset                  # shows the username, asks for a new password
+sudo eduka-block-reset --show-username  # only prints the username
+sudo eduka-block-reset --remove         # deletes the account; the next start asks to create a new one
+```
+
+The password itself cannot be shown. Only a salted PBKDF2-SHA256 hash is stored in `/usr/share/Eduka-Block/credentials.txt`.
+
+If nobody knows the administrator password either, it must be reset first with the operating system's own recovery procedure (for example, the recovery mode boot menu). This is intentional: otherwise a student could remove the protection.
+
 ## Installation
 
 ### With internet (recommended)
 
 ```bash
-sudo apt install ./eduka-block_0.5.0-1_all.deb
+sudo apt install ./eduka-block_0.5.1-1_all.deb
 ```
 
 APT downloads the dependencies automatically. Upgrading from an older version keeps the account and all rules.
 
-### Without internet: single-file installer
+### Installing in Edukasaun OS with Cubic
 
-`eduka-block-0.5.0-offline-trixie-amd64.run` contains Eduka-Block **and every dependency** as a small local package repository:
+To include Eduka-Block in a customised Edukasaun OS ISO, build the package (or download it from the CI artifacts/releases) and install it in **Cubic's terminal** page:
+
+1. Drag `eduka-block_0.5.1-1_all.deb` into the Cubic terminal window. Cubic copies it into the image's current directory.
+2. Install it with its dependencies (Cubic's chroot has internet access):
+
+   ```bash
+   apt update
+   apt install -y ./eduka-block_0.5.1-1_all.deb
+   ```
+
+3. The installer prints `Eduka-Block: installed into an image; protection starts at the first boot.` Nothing is started inside Cubic, and the host's NetworkManager and services are never touched.
+4. Continue in Cubic and generate the ISO. On every computer installed from it, `eduka-block-firewall.service` and `eduka-block-sync.timer` start at boot. Strict mode (SafeSearch and anti-bypass) is active immediately. When Eduka-Block is opened the first time, it asks the parent or teacher to create the account.
+
+To check the result in the Cubic terminal:
 
 ```bash
-sudo sh eduka-block-0.5.0-offline-trixie-amd64.run
+dpkg -l eduka-block
+systemctl is-enabled eduka-block-firewall.service eduka-block-sync.timer   # both: enabled
+```
+
+Each installed computer gets its own Eduka-Block account. Do not copy `credentials.txt` into the image unless every computer should share one parent/teacher password.
+
+### Without internet: single-file installer
+
+`eduka-block-0.5.1-offline-trixie-amd64.run` contains Eduka-Block **and every dependency** as a small local package repository:
+
+```bash
+sudo sh eduka-block-0.5.1-offline-trixie-amd64.run
 ```
 
 - APT installs only what the computer is missing, and never downgrades packages.
 - If the computer lacks something that the bundle does not contain, the installer falls back to the internet. Use `--offline-only` to prevent that, or `--extract DIR` to inspect the contents.
-- Check the download with the accompanying `.sha256` file: `sha256sum -c eduka-block-0.5.0-offline-trixie-amd64.run.sha256`.
+- Check the download with the accompanying `.sha256` file: `sha256sum -c eduka-block-0.5.1-offline-trixie-amd64.run.sha256`.
 
 CI builds the offline installer for Debian 13 (Edukasaun OS) inside a `debian:trixie` container on every push. It also tests the installer on a clean minimal Debian 13, and attaches it to the GitHub release when a `v*` tag is pushed. To build it yourself on a Debian 13 machine or container:
 
@@ -98,6 +153,7 @@ English (International) is the default. Tetum, Português (Portugal), Português
 | Path | Purpose |
 | --- | --- |
 | `/usr/share/Eduka-Block/credentials.txt` | Username, salt and PBKDF2-SHA256 password hash (never the password) |
+| `/usr/sbin/eduka-block-reset` | Terminal account recovery (root only) |
 | `/var/lib/eduka-block/blocklist.json` | Rules and settings (schema 4) |
 | `/var/lib/eduka-block/<category>-domains.txt` | Cached category lists |
 | `/etc/hosts` | Managed Eduka-Block section |
@@ -114,7 +170,7 @@ English (International) is the default. Tetum, Português (Portugal), Português
 ## Development
 
 ```bash
-./build.sh                                      # dist/eduka-block_0.5.0-1_all.deb
+./build.sh                                      # dist/eduka-block_0.5.1-1_all.deb
 python3 -m unittest discover -s tests -v        # GTK smoke test runs when GTK + a display exist
 xvfb-run -a python3 -m unittest discover -s tests -v
 python3 src/eduka_block.py                      # interface from the source tree (the helper must be installed)
@@ -131,7 +187,7 @@ sudo apt purge eduka-block    # removes everything
 
 ## Project
 
-- Name: **Eduka-Block**, version **0.5.0** (package **0.5.0-1**)
+- Name: **Eduka-Block**, version **0.5.1** (package **0.5.1-1**)
 - Target: Edukasaun OS (Debian 13) with Eduka-Desktop/LXQt
 - Developer: **STI-MCAS & IDEA** · Project lead: **Hugo Moniz do Rego**
 - Website: <https://edukasaunos.tl> · Licence: GPL-3.0-or-later

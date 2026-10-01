@@ -11,6 +11,7 @@
     <p>The interface defaults to International English and includes Tetum, European Portuguese, Brazilian Portuguese and Indonesian.</p>
   </description>
   <launchable type="desktop-id">eduka-block.desktop</launchable>
+  <icon type="stock">eduka-block</icon>
   <screenshots>
     <screenshot type="default">
       <caption>Dashboard with protection layers</caption>
@@ -25,6 +26,9 @@
   <developer id="tl.edukasaunos"><name>STI-MCAS &amp; IDEA</name></developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.1" date="2026-10-01">
+      <description><p>Official logo, account recovery for forgotten usernames and passwords (sign-in screen and eduka-block-reset), and safe installation inside image builders such as Cubic.</p></description>
+    </release>
     <release version="0.5.0" date="2026-10-01">
       <description><p>Redesigned interface with dashboard and one-click recommended protection, category lists for adult content, gambling, social media and malware, SafeSearch and encrypted-DNS anti-bypass, browser policies, and a single-file offline installer.</p></description>
     </release>

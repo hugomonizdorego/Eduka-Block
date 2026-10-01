@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.5.1"
 APP_SHARE_DIR = Path("/usr/share/Eduka-Block")
 CREDENTIALS_PATH = APP_SHARE_DIR / "credentials.txt"
 PBKDF2_ITERATIONS = 600_000
