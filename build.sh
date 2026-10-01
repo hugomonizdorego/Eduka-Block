@@ -46,6 +46,7 @@ install -m 0755 "$PROJECT_DIR/src/eduka_block.py" "$BUILD_ROOT/usr/bin/eduka-blo
 install -m 0755 "$PROJECT_DIR/src/eduka_block_helper.py" "$BUILD_ROOT/usr/lib/eduka-block/eduka-block-helper"
 install -m 0644 "$PROJECT_DIR/src/eduka_block_common.py" "$BUILD_ROOT/usr/lib/eduka-block/eduka_block_common.py"
 install -m 0644 "$PROJECT_DIR/src/eduka_block_i18n.py" "$BUILD_ROOT/usr/lib/eduka-block/eduka_block_i18n.py"
+install -m 0644 "$PROJECT_DIR/src/eduka_block_data.py" "$BUILD_ROOT/usr/lib/eduka-block/eduka_block_data.py"
 install -m 0644 "$PROJECT_DIR/assets/eduka-block.css" "$BUILD_ROOT/usr/share/eduka-block/eduka-block.css"
 install -m 0644 "$PROJECT_DIR/assets/eduka-block.svg" "$BUILD_ROOT/usr/share/icons/hicolor/scalable/apps/eduka-block.svg"
 install -m 0644 "$PROJECT_DIR/data/eduka-block.desktop" "$BUILD_ROOT/usr/share/applications/eduka-block.desktop"

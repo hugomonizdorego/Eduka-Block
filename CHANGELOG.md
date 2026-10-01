@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.5.0 — 2026-10-01
+
+### Interface
+
+- Completely redesigned: dark sidebar navigation with Dashboard, Websites, Categories and Advanced pages, rounded cards, status pills and short notifications.
+- Dashboard shows the protection level (6 layers), totals and a quick "Block a website" box.
+- **Turn on recommended protection** enables the adult, gambling and malware lists plus strict mode in one step.
+- Categories page: one switch per list with domain count and update date.
+- Squid keywords are shown as chips; the account, About and Smart IP settings moved to Advanced.
+- New sign-in and account dialogs.
+
+### Blocking
+
+- Category lists: Adult content, Gambling, Social media, and Malware/scams/ads (StevenBlack/hosts), refreshed automatically every 7 days by the sync timer.
+- Strict mode (on by default) adds:
+  - SafeSearch for Google (51 country domains), Bing and DuckDuckGo, and YouTube Restricted Mode.
+  - Blocking of DNS-over-HTTPS resolvers by name (DNS) and by address (firewall, ports 443/853), and of all DNS-over-TLS.
+  - Firefox's DoH canary domain answered with NXDOMAIN.
+  - Firefox and Chromium/Chrome/Brave/Edge enterprise policies.
+- A blocked site always wins over its SafeSearch address.
+- When NetworkManager's dnsmasq is the resolver, category lists are served by dnsmasq (wildcard, NXDOMAIN) instead of `/etc/hosts`, so name lookups stay fast. The sync timer moves them automatically when the resolver changes.
+- Rules entered as `www.example.com` (or a `https://www...` URL) are stored as `example.com`, so every subdomain is blocked.
+- Firefox policies are merged into an existing `policies.json` and restored exactly when strict mode is turned off. A broken third-party policy file no longer prevents other layers from applying.
+
+### Installation
+
+- New single-file offline installer (`eduka-block-<version>-offline-<codename>-<arch>.run`) containing every dependency as a local APT repository. It installs without internet and falls back to the internet only when needed.
+- `tools/build-offline-bundle.sh` builds it. CI builds it for Debian 13, tests it on a clean minimal system, and attaches it to GitHub releases for `v*` tags.
+
+### Internal
+
+- State schema 4 (category lists, strict mode, DNS mode); older states migrate automatically.
+- New helper action `protection-configure`; the 0.4 `adult-*` actions still work.
+- Translations regenerated: obsolete strings removed, all new strings translated into Tetum, Portuguese (Portugal/Brazil) and Indonesian.
+- The test suite now runs every helper operation inside a temporary root, and includes a headless GTK smoke test.
+
 ## 0.4.2 — 2026-09-30
 
 ### Fixed

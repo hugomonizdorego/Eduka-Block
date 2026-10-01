@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-APP_VERSION = "0.4.2"
+APP_VERSION = "0.5.0"
 APP_SHARE_DIR = Path("/usr/share/Eduka-Block")
 CREDENTIALS_PATH = APP_SHARE_DIR / "credentials.txt"
 PBKDF2_ITERATIONS = 600_000
@@ -98,6 +98,16 @@ def normalize_target(raw: str) -> tuple[str, str]:
     if not DOMAIN_RE.fullmatch(domain):
         raise ValidationError("err_domain_invalid")
     return domain, "domain"
+
+
+def rule_target(raw: str) -> tuple[str, str]:
+    """Normalise a parent/teacher rule. "www.example.org" becomes "example.org"
+    so the wildcard DNS rule covers every subdomain of the site, not only
+    "*.www.example.org"."""
+    value, kind = normalize_target(raw)
+    if kind == "domain" and value.startswith("www.") and value.count(".") >= 2:
+        value = value[4:]
+    return value, kind
 
 
 def validate_account(username: str, password: str) -> None:

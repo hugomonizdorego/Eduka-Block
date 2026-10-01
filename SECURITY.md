@@ -1,4 +1,4 @@
-# Security model — Eduka-Block 0.4.2
+# Security model — Eduka-Block 0.5.0
 
 Eduka-Block separates its unprivileged GTK interface from a small root helper.
 
@@ -52,6 +52,24 @@ addresses can host unrelated services, so expanding one domain to an entire subn
 would create unsafe collateral blocking. Administrators can add a reviewed CIDR rule
 explicitly.
 
+## Strict mode (SafeSearch and anti-bypass)
+
+- SafeSearch pins search hosts to the providers' documented restricted endpoints (`forcesafesearch.google.com`, `restrictmoderate.youtube.com`, `strict.bing.com`, `safe.duckduckgo.com`) through `/etc/hosts`. Addresses are resolved during sync, with published fallbacks for offline boots. A host that is itself blocked is never re-opened by a SafeSearch record.
+- Anti-bypass only blocks encrypted DNS: well-known DoH hostnames in DNS, HTTPS/QUIC to well-known DoH resolver addresses, and DNS-over-TLS (port 853). Plain DNS on port 53 is untouched, so a system that uses those resolvers keeps working.
+- Browser policies use each browser's supported enterprise-policy location. The Firefox file is merged, not replaced: the previous values of the keys Eduka-Block sets are saved (`/var/lib/eduka-block/firefox-policies.original.json`, mode 0600) and restored when strict mode is turned off. Invalid policy files are left untouched and reported on stderr; the other layers still apply.
+
+## Category lists
+
+- Lists are fetched only from the hard-coded HTTPS URLs in `eduka_block_data.py` on `raw.githubusercontent.com`. Redirects to other hosts are rejected.
+- Size is capped at 16 MiB, each list must contain a plausible number of domains, and every domain is re-validated before it is written.
+- Downloads happen before the system lock is taken and are installed in one transaction. Cached files are restored if applying fails.
+
+## Offline installer
+
+- The `.run` file is a shell script plus a tar archive of `.deb` packages and an APT index. It is published with a SHA-256 checksum.
+- It configures a private, temporary APT source (`trusted=yes`, because the packages come from the verified bundle itself). The system's own sources and package lists are not modified.
+- Only packages the computer is missing are installed; APT never downgrades installed packages.
+
 ## Import
 
 - Imported files are parsed by the unprivileged interface only to extract candidate targets; the helper validates every entry again with the same rules as a manual addition.
@@ -68,9 +86,9 @@ explicitly.
 - Eduka-Block does not perform SSL bump, install a local certificate authority, or decrypt HTTPS content. For proxied HTTPS it filters the destination hostname exposed to the forward proxy, not encrypted paths or page bodies.
 - Keyword rules can cause false positives. Parents and teachers are responsible for reviewing broad terms such as `sex`.
 
-## Adult blocklist
+## Third-party lists
 
-The optional adult list is fetched only from the hard-coded HTTPS endpoint on `raw.githubusercontent.com`. Redirect destination, maximum byte size, minimum/maximum domain count, UTF-8 decoding, and every domain are validated. Third-party blocklist content can still contain false positives or omissions.
+Third-party blocklists can contain false positives or omissions. Parents and teachers can add their own rules at any time.
 
 ## Reporting
 

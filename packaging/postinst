@@ -10,14 +10,10 @@ install -d -o root -g root -m 0755 /usr/share/Eduka-Block
 if [ ! -e "$STATE_FILE" ]; then
     umask 022
     printf '%s\n' '{' \
-        '  "schema": 3,' \
+        '  "schema": 4,' \
         '  "entries": [],' \
-        '  "adult_protection": {' \
-        '    "enabled": false,' \
-        '    "domain_count": 0,' \
-        '    "source": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts",' \
-        '    "updated_at": null' \
-        '  },' \
+        '  "lists": {},' \
+        '  "strict_mode": {"enabled": true, "safe_ips": {}, "updated_at": null},' \
         '  "smart_sync": {"last_run": null},' \
         '  "squid_proxy": {' \
         '    "enabled": false,' \
@@ -49,6 +45,13 @@ fi
 
 # 0.4.1 and older used /run/lock, which is world-writable.
 rm -f /run/lock/eduka-block.lock
+
+# Run one sync in the background: it notices when NetworkManager's dnsmasq
+# becomes the resolver, moves category lists out of /etc/hosts and refreshes
+# SafeSearch addresses. It does not delay the installation.
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl start --no-block eduka-block-sync.service >/dev/null 2>&1 || true
+fi
 
 # Re-apply an existing Squid setting during upgrades so 0.4 installations gain
 # the localhost-only listener and reversible port migration immediately.

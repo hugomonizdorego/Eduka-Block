@@ -14,7 +14,7 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango  # noqa: E402
 
 
 # Prefer modules next to this file when running from a source checkout; the
@@ -32,10 +32,11 @@ from eduka_block_common import (  # noqa: E402
     CREDENTIALS_PATH,
     ValidationError,
     export_rules_text,
-    normalize_target,
     parse_rules_text,
+    rule_target,
     verify_credentials,
 )
+from eduka_block_data import RECOMMENDED_LISTS  # noqa: E402
 from eduka_block_i18n import LANGUAGES, load_language, save_language, tr  # noqa: E402
 
 
@@ -47,6 +48,7 @@ AUTO_LOCK_SECONDS = 600
 MAX_LOGIN_ATTEMPTS = 5
 MAX_IMPORT_ITEMS = 1000
 MAX_IMPORT_FILE_BYTES = 2 * 1024 * 1024
+TOAST_SECONDS = 4
 RESPONSE_CHANGE_ACCOUNT = 1001
 CURRENT_LANGUAGE = load_language(CONFIG_PATH)
 
@@ -54,8 +56,7 @@ CURRENT_LANGUAGE = load_language(CONFIG_PATH)
 # system lock, so every timeout leaves room for that plus the work itself.
 HELPER_TIMEOUTS = {
     "status": 30,
-    "adult-enable": 300,
-    "adult-update": 300,
+    "protection-configure": 420,
     "squid-configure": 180,
     "sync-smart-ips": 600,
     "import": 180,
@@ -94,6 +95,19 @@ TYPE_KEYS = {
     "ipv4_network": "type_ipv4_network",
     "ipv6_network": "type_ipv6_network",
 }
+# Category blocklists shown on the Categories page: (key, icon).
+LIST_ROWS = (
+    ("adult", "action-unavailable-symbolic"),
+    ("gambling", "applications-games-symbolic"),
+    ("social", "system-users-symbolic"),
+    ("malware", "dialog-warning-symbolic"),
+)
+NAV_PAGES = (
+    ("dashboard", "nav_dashboard", "security-high-symbolic"),
+    ("websites", "nav_websites", "web-browser-symbolic"),
+    ("categories", "nav_categories", "view-grid-symbolic"),
+    ("advanced", "nav_advanced", "preferences-system-symbolic"),
+)
 STATE_CLASSES = ("status-ok", "status-warning", "status-error")
 
 # Tree model columns.
@@ -152,6 +166,71 @@ def set_state_class(widget: Gtk.Widget, state: str) -> None:
     context.add_class(f"status-{state}")
 
 
+def add_classes(widget: Gtk.Widget, *classes: str) -> Gtk.Widget:
+    context = widget.get_style_context()
+    for style_class in classes:
+        context.add_class(style_class)
+    return widget
+
+
+def label(text: str = "", *classes: str, wrap: bool = False, xalign: float = 0) -> Gtk.Label:
+    widget = Gtk.Label(label=text, xalign=xalign)
+    if wrap:
+        widget.set_line_wrap(True)
+        widget.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    return add_classes(widget, *classes)
+
+
+def icon(name: str, size: int, *classes: str) -> Gtk.Image:
+    image = Gtk.Image.new_from_icon_name(name, Gtk.IconSize.BUTTON)
+    image.set_pixel_size(size)
+    return add_classes(image, *classes)
+
+
+def logo_image(size: int) -> Gtk.Image:
+    """The application logo scaled to ``size`` pixels (SVGs load at full size otherwise)."""
+    for candidate in (Path(ICON), SOURCE_DIR.parent / "assets" / "eduka-block.svg"):
+        if candidate.exists():
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(candidate), size, size, True)
+                return Gtk.Image.new_from_pixbuf(pixbuf)
+            except GLib.Error:
+                break
+    return icon("security-high-symbolic", size)
+
+
+def short_time(value: object) -> str:
+    """"14:05" for today, otherwise "09-28 14:05"."""
+    text = local_time(value)
+    if not text:
+        return "—"
+    today = datetime.now().strftime("%Y-%m-%d")
+    return text[11:] if text.startswith(today) else text[5:]
+
+
+def button(text: str, callback, *classes: str, icon_name: str | None = None) -> Gtk.Button:
+    widget = Gtk.Button()
+    content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    content.set_halign(Gtk.Align.CENTER)
+    if icon_name:
+        content.pack_start(icon(icon_name, 16), False, False, 0)
+    content.pack_start(Gtk.Label(label=text), False, False, 0)
+    widget.add(content)
+    widget.connect("clicked", callback)
+    return add_classes(widget, *classes)
+
+
+def sync_switch(switch: Gtk.Switch, value: bool) -> None:
+    """Set both "active" and "state": handlers that return True defer "state"."""
+    switch.set_active(value)
+    switch.set_state(value)
+
+
+def card(spacing: int = 12, *classes: str) -> Gtk.Box:
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
+    return add_classes(box, "card", *classes)
+
+
 def load_css() -> None:
     provider = Gtk.CssProvider()
     css_path = SOURCE_DIR.parent / "assets" / "eduka-block.css"
@@ -181,7 +260,7 @@ def message(parent: Gtk.Window | None, title: str, body: str, error: bool = Fals
     dialog.destroy()
 
 
-def confirm(parent: Gtk.Window, title: str, body: str) -> bool:
+def confirm(parent: Gtk.Window, title: str, body: str, action_key: str = "continue") -> bool:
     dialog = Gtk.MessageDialog(
         transient_for=parent,
         modal=True,
@@ -190,26 +269,31 @@ def confirm(parent: Gtk.Window, title: str, body: str) -> bool:
         text=title,
     )
     dialog.format_secondary_text(body)
-    dialog.add_button(T("continue"), Gtk.ResponseType.OK)
+    dialog.add_button(T(action_key), Gtk.ResponseType.OK)
     dialog.set_default_response(Gtk.ResponseType.OK)
     result = dialog.run() == Gtk.ResponseType.OK
     dialog.destroy()
     return result
 
 
-def section_title(key: str) -> Gtk.Label:
-    title = Gtk.Label(xalign=0)
-    title.set_ellipsize(Pango.EllipsizeMode.END)
-    title.set_markup(f"<b>{GLib.markup_escape_text(T(key))}</b>")
-    title.get_style_context().add_class("section-title")
-    return title
+def protection_layers(status: dict) -> list[tuple[str, bool]]:
+    """(label key, active) for each layer the dashboard scores."""
+    lists = status.get("lists", {})
+    return [
+        ("layer_adult", bool(lists.get("adult", {}).get("enabled"))),
+        ("layer_gambling", bool(lists.get("gambling", {}).get("enabled"))),
+        ("layer_malware", bool(lists.get("malware", {}).get("enabled"))),
+        ("layer_strict", bool(status.get("strict_mode", {}).get("enabled"))),
+        ("layer_browsers", bool(status.get("browser_policies"))),
+        ("layer_dns", bool(status.get("dns_engine"))),
+    ]
 
 
-def icon_button(icon: str, tooltip_key: str, callback) -> Gtk.Button:
-    button = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.BUTTON)
-    button.set_tooltip_text(T(tooltip_key))
-    button.connect("clicked", callback)
-    return button
+def recommended_active(status: dict) -> bool:
+    lists = status.get("lists", {})
+    return all(lists.get(key, {}).get("enabled") for key in RECOMMENDED_LISTS) and bool(
+        status.get("strict_mode", {}).get("enabled")
+    )
 
 
 class AccountDialog(Gtk.Dialog):
@@ -219,75 +303,63 @@ class AccountDialog(Gtk.Dialog):
         super().__init__(transient_for=parent, modal=True)
         self.mode = mode
         self.setup = mode != "login"
-        self.set_default_size(430, 370 if self.setup else 300)
+        self.set_default_size(400, -1)
         self.set_resizable(False)
         self.set_position(Gtk.WindowPosition.CENTER)
-        self.get_style_context().add_class("auth-dialog")
+        add_classes(self, "auth-dialog")
         self.cancel_button = self.add_button("", Gtk.ResponseType.CANCEL)
         self.change_button = None
         if mode == "login":
             self.change_button = self.add_button("", RESPONSE_CHANGE_ACCOUNT)
+            add_classes(self.change_button, "flat-button")
         self.action_button = self.add_button("", Gtk.ResponseType.OK)
-        self.action_button.get_style_context().add_class("suggested-action")
+        add_classes(self.action_button, "suggested-action")
         self.set_default_response(Gtk.ResponseType.OK)
 
         box = self.get_content_area()
-        box.set_spacing(9)
-        box.set_border_width(16)
-        box.get_style_context().add_class("auth-panel")
-        shield = Gtk.Image.new_from_icon_name("security-high-symbolic", Gtk.IconSize.DIALOG)
-        shield.set_pixel_size(30)
-        shield.get_style_context().add_class("auth-icon")
-        box.pack_start(shield, False, False, 0)
-        self.heading = Gtk.Label()
-        self.heading.set_xalign(0.5)
-        self.heading.get_style_context().add_class("boxed-heading")
-        box.pack_start(self.heading, False, False, 0)
-        self.note = Gtk.Label()
-        self.note.set_line_wrap(True)
-        self.note.set_max_width_chars(48)
-        self.note.set_justify(Gtk.Justification.CENTER)
-        self.note.get_style_context().add_class("info-box")
-        box.pack_start(self.note, False, False, 0)
+        box.set_spacing(0)
+        box.set_border_width(0)
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        add_classes(panel, "auth-panel")
+        box.pack_start(panel, True, True, 0)
 
-        grid = Gtk.Grid(column_spacing=9, row_spacing=8)
-        grid.set_border_width(8)
-        grid.get_style_context().add_class("form-box")
-        box.pack_start(grid, False, False, 0)
-        self.language_label = Gtk.Label(xalign=0)
-        self.language_label.get_style_context().add_class("field-label")
-        grid.attach(self.language_label, 0, 0, 1, 1)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self.language_combo = Gtk.ComboBoxText()
-        self.language_combo.set_hexpand(True)
         for code, name in LANGUAGES.items():
             self.language_combo.append(code, name)
         self.language_combo.set_active_id(CURRENT_LANGUAGE)
         self.language_combo.connect("changed", self.on_language)
-        grid.attach(self.language_combo, 1, 0, 1, 1)
-        self.username_label = Gtk.Label(xalign=0)
-        self.username_label.get_style_context().add_class("field-label")
-        grid.attach(self.username_label, 0, 1, 1, 1)
+        top.pack_end(self.language_combo, False, False, 0)
+        panel.pack_start(top, False, False, 0)
+
+        logo = add_classes(logo_image(72), "auth-logo")
+        panel.pack_start(logo, False, False, 4)
+        self.heading = label("", "auth-title", xalign=0.5)
+        panel.pack_start(self.heading, False, False, 0)
+        self.note = label("", "auth-note", wrap=True, xalign=0.5)
+        self.note.set_justify(Gtk.Justification.CENTER)
+        self.note.set_max_width_chars(44)
+        panel.pack_start(self.note, False, False, 6)
+
+        self.username_label = label("", "field-label")
+        panel.pack_start(self.username_label, False, False, 0)
         self.username = Gtk.Entry()
         self.username.set_activates_default(True)
-        grid.attach(self.username, 1, 1, 1, 1)
-        self.password_label = Gtk.Label(xalign=0)
-        self.password_label.get_style_context().add_class("field-label")
-        grid.attach(self.password_label, 0, 2, 1, 1)
+        panel.pack_start(self.username, False, False, 0)
+        self.password_label = label("", "field-label")
+        panel.pack_start(self.password_label, False, False, 0)
         self.password = self.password_entry()
-        grid.attach(self.password, 1, 2, 1, 1)
+        panel.pack_start(self.password, False, False, 0)
         self.confirm_label = None
         self.confirm_password = None
         self.password_status = None
         if self.setup:
-            self.confirm_label = Gtk.Label(xalign=0)
-            self.confirm_label.get_style_context().add_class("field-label")
-            grid.attach(self.confirm_label, 0, 3, 1, 1)
+            self.confirm_label = label("", "field-label")
+            panel.pack_start(self.confirm_label, False, False, 0)
             self.confirm_password = self.password_entry()
-            grid.attach(self.confirm_password, 1, 3, 1, 1)
-            self.password_status = Gtk.Label(xalign=0)
-            self.password_status.set_line_wrap(True)
-            self.password_status.get_style_context().add_class("password-status")
-            grid.attach(self.password_status, 0, 4, 2, 1)
+            panel.pack_start(self.confirm_password, False, False, 0)
+            self.password_status = label("", "password-status", wrap=True)
+            panel.pack_start(self.password_status, False, False, 4)
             self.username.connect("changed", self.on_account_field_changed)
             self.password.connect("changed", self.on_account_field_changed)
             self.confirm_password.connect("changed", self.on_account_field_changed)
@@ -310,33 +382,22 @@ class AccountDialog(Gtk.Dialog):
 
     def update_text(self) -> None:
         titles = {"setup": "setup_title", "login": "login_title", "change": "change_account_title"}
-        headings = {
-            "setup": "protect_settings",
-            "login": "manager_authorization",
-            "change": "change_account_title",
-        }
         notes = {"setup": "setup_note", "login": "login_note", "change": "change_account_note"}
         actions = {"setup": "create_account", "login": "sign_in", "change": "save_account"}
-        self.set_title(T(titles[self.mode]))
+        self.set_title("Eduka-Block")
         self.cancel_button.set_label(T("cancel"))
         self.action_button.set_label(T(actions[self.mode]))
         if self.change_button:
             self.change_button.set_label(T("change_account"))
-        self.heading.set_markup(
-            "<span size='large' weight='bold'>"
-            + GLib.markup_escape_text(T(headings[self.mode]))
-            + "</span>"
-        )
+        self.heading.set_text(T(titles[self.mode]))
         self.note.set_text(T(notes[self.mode]))
-        self.language_label.set_text(T("language"))
         self.username_label.set_text(T("username"))
         self.username.set_placeholder_text(T("username_hint"))
         self.password_label.set_text(T("password"))
-        self.password.set_placeholder_text(T("password_minimum"))
+        self.password.set_placeholder_text(T("password_minimum") if self.setup else "")
         self.password.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY, T("show_password"))
         if self.confirm_label:
             self.confirm_label.set_text(T("repeat_password"))
-            self.confirm_password.set_placeholder_text(T("repeat_password"))
             self.confirm_password.set_icon_tooltip_text(
                 Gtk.EntryIconPosition.SECONDARY, T("show_password")
             )
@@ -406,215 +467,244 @@ def run_account_change(parent: Gtk.Window | None) -> str | None:
 
 class MainWindow(Gtk.Window):
     def __init__(self, status: dict):
-        super().__init__(title=f"Eduka-Block {APP_VERSION}")
+        super().__init__(title="Eduka-Block")
         self.status = status
         self.lock_requested = False
         self.restart_requested = False
         self.refreshing = False
         self.language_ready = False
         self.busy_active = False
+        self.toast_timer = 0
+        self.switching_page = False
         self.last_activity = time.monotonic()
-        self.set_default_size(900, 600)
-        self.set_size_request(700, 500)
+        self.set_default_size(980, 660)
+        self.set_size_request(760, 540)
         self.set_position(Gtk.WindowPosition.CENTER)
-        self.get_style_context().add_class("eduka-window")
+        add_classes(self, "eduka-window")
         if Path(ICON).exists():
             self.set_icon_from_file(ICON)
-        self.connect("destroy", lambda *_: Gtk.main_quit())
+        self.connect("destroy", lambda *_: Gtk.main_level() and Gtk.main_quit())
         self.connect("delete-event", self.on_delete)
         self.connect("event", self.on_activity)
         self.connect("key-press-event", self.on_key_press)
         GLib.timeout_add_seconds(10, self.auto_lock_check)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.add(outer)
-        outer.pack_start(self.build_header(), False, False, 0)
-        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.content.set_border_width(10)
-        outer.pack_start(self.content, True, True, 0)
-        self.notebook = Gtk.Notebook()
-        self.notebook.set_scrollable(True)
-        self.notebook.get_style_context().add_class("main-tabs")
-        rules_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
-        rules_page.set_border_width(2)
-        rules_page.pack_start(self.build_overview(), False, False, 0)
-        rules_page.pack_start(self.build_add_card(), False, False, 0)
-        rules_page.pack_start(self.build_adult_card(), False, False, 0)
-        rules_page.pack_start(self.build_list_card(), True, True, 0)
-        self.notebook.append_page(rules_page, Gtk.Label(label=T("rules_tab")))
-        self.notebook.append_page(self.build_squid_page(), Gtk.Label(label=T("squid_tab")))
-        self.content.pack_start(self.notebook, True, True, 0)
-        self.content.pack_start(self.build_footer(), False, False, 0)
+        layout = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.add(layout)
+        layout.pack_start(self.build_sidebar(), False, False, 0)
+
+        overlay = Gtk.Overlay()
+        layout.pack_start(overlay, True, True, 0)
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_duration(160)
+        overlay.add(self.stack)
+        for name, builder in (
+            ("dashboard", self.build_dashboard),
+            ("websites", self.build_websites),
+            ("categories", self.build_categories),
+            ("advanced", self.build_advanced),
+        ):
+            self.stack.add_named(self.page(builder()), name)
+        overlay.add_overlay(self.build_toast())
+
         self.show_all()
+        self.toast_revealer.set_reveal_child(False)
         self.load_status(status)
         self.language_ready = True
-        self.target_entry.grab_focus()
-
-    def make_card(self, spacing: int = 7) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
-        box.set_border_width(7)
-        box.get_style_context().add_class("card")
-        return box
+        self.select_page("dashboard")
 
     # ------------------------------------------------------------------ layout
 
-    def build_header(self) -> Gtk.Widget:
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        header.set_border_width(8)
-        header.get_style_context().add_class("topbar")
-        image = (
-            Gtk.Image.new_from_file(ICON)
-            if Path(ICON).exists()
-            else Gtk.Image.new_from_icon_name("security-high-symbolic", Gtk.IconSize.DIALOG)
-        )
-        image.set_pixel_size(30)
-        header.pack_start(image, False, False, 0)
-        titles = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
-        name = Gtk.Label(xalign=0)
-        name.set_markup("<span size='large' weight='bold'>Eduka-Block</span>")
-        name.get_style_context().add_class("brand-box")
-        subtitle = Gtk.Label(label=T("app_subtitle"), xalign=0)
-        subtitle.set_max_width_chars(28)
-        subtitle.set_ellipsize(Pango.EllipsizeMode.END)
-        subtitle.get_style_context().add_class("subtitle-box")
-        titles.pack_start(name, False, False, 0)
-        titles.pack_start(subtitle, False, False, 0)
-        header.pack_start(titles, True, True, 0)
+    @staticmethod
+    def page(content: Gtk.Widget) -> Gtk.Widget:
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        add_classes(scroll, "page-scroll")
+        add_classes(content, "page")
+        scroll.add(content)
+        return scroll
+
+    @staticmethod
+    def page_header(title_key: str, subtitle_key: str) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.pack_start(label(T(title_key), "page-title"), False, False, 0)
+        box.pack_start(label(T(subtitle_key), "page-subtitle", wrap=True), False, False, 0)
+        return box
+
+    def build_sidebar(self) -> Gtk.Widget:
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        add_classes(sidebar, "sidebar")
+        sidebar.set_size_request(208, -1)
+
+        brand = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        add_classes(brand, "brand")
+        brand.pack_start(logo_image(38), False, False, 0)
+        names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        names.set_valign(Gtk.Align.CENTER)
+        names.pack_start(label("Eduka-Block", "brand-name"), False, False, 0)
+        names.pack_start(label(T("brand_tagline", version=APP_VERSION), "brand-version"), False, False, 0)
+        brand.pack_start(names, False, False, 0)
+        sidebar.pack_start(brand, False, False, 0)
+
+        self.nav_buttons: dict[str, Gtk.ToggleButton] = {}
+        for name, label_key, icon_name in NAV_PAGES:
+            nav = Gtk.ToggleButton()
+            add_classes(nav, "nav-button")
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            row.pack_start(icon(icon_name, 16), False, False, 0)
+            row.pack_start(Gtk.Label(label=T(label_key), xalign=0), True, True, 0)
+            nav.add(row)
+            nav.connect("toggled", self.on_nav_toggled, name)
+            self.nav_buttons[name] = nav
+            sidebar.pack_start(nav, False, False, 0)
+
+        sidebar.pack_start(Gtk.Box(), True, True, 0)
         self.busy = Gtk.Spinner()
-        header.pack_start(self.busy, False, False, 0)
-        language = Gtk.ComboBoxText()
-        for code, label in LANGUAGES.items():
-            language.append(code, label)
-        language.set_active_id(CURRENT_LANGUAGE)
-        language.set_tooltip_text(T("language"))
-        language.connect("changed", self.on_language_change)
-        header.pack_start(language, False, False, 0)
-        lock = icon_button("changes-prevent-symbolic", "lock", self.on_lock)
-        header.pack_start(lock, False, False, 0)
-        menu = Gtk.MenuButton()
-        menu.set_image(Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON))
-        popover = Gtk.Popover.new(menu)
-        menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        menu_box.set_border_width(8)
-        for label_key, callback in (
-            ("import_rules", self.on_import),
-            ("export_rules", self.on_export),
-            ("sync_now", self.on_sync_now),
-            ("change_account", self.on_change_account),
-            ("about", self.on_about),
-        ):
-            item = Gtk.ModelButton(label=T(label_key))
-            item.connect("clicked", callback)
-            menu_box.pack_start(item, False, False, 0)
-        popover.add(menu_box)
-        # Only realise the children: calling show_all() on the popover itself
-        # would pop the menu open as soon as the window appears.
-        menu_box.show_all()
-        menu.set_popover(popover)
-        header.pack_start(menu, False, False, 0)
-        # Header controls stay out of reach while a privileged action runs.
-        self.header_controls = (language, lock, menu)
-        return header
+        add_classes(self.busy, "sidebar-spinner")
+        sidebar.pack_start(self.busy, False, False, 0)
+        self.busy_label = label("", "sidebar-note", wrap=True)
+        sidebar.pack_start(self.busy_label, False, False, 0)
 
-    def build_overview(self) -> Gtk.Widget:
-        card = self.make_card(5)
+        self.language_combo = Gtk.ComboBoxText()
+        for code, name in LANGUAGES.items():
+            self.language_combo.append(code, name)
+        self.language_combo.set_active_id(CURRENT_LANGUAGE)
+        self.language_combo.set_tooltip_text(T("language"))
+        self.language_combo.connect("changed", self.on_language_change)
+        add_classes(self.language_combo, "sidebar-combo")
+        sidebar.pack_start(self.language_combo, False, False, 0)
+        self.lock_button = button(T("lock"), self.on_lock, "sidebar-lock", icon_name="system-lock-screen-symbolic")
+        self.lock_button.set_tooltip_text(T("lock_tooltip"))
+        sidebar.pack_start(self.lock_button, False, False, 0)
+        return sidebar
+
+    def build_toast(self) -> Gtk.Widget:
+        self.toast_revealer = Gtk.Revealer()
+        self.toast_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        self.toast_revealer.set_halign(Gtk.Align.CENTER)
+        self.toast_revealer.set_valign(Gtk.Align.END)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        add_classes(box, "toast")
+        self.toast_icon = icon("emblem-ok-symbolic", 16)
+        box.pack_start(self.toast_icon, False, False, 0)
+        self.toast_label = label("", "toast-text")
+        self.toast_label.set_max_width_chars(60)
+        self.toast_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        box.pack_start(self.toast_label, False, False, 0)
+        self.toast_revealer.add(box)
+        self.toast_box = box
+        return self.toast_revealer
+
+    def build_dashboard(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+
+        self.hero = card(0, "hero")
+        hero_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
+        self.hero_icon = icon("security-high-symbolic", 56, "hero-icon")
+        hero_row.pack_start(self.hero_icon, False, False, 0)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        texts.set_valign(Gtk.Align.CENTER)
+        self.hero_title = label("", "hero-title", wrap=True)
+        self.hero_subtitle = label("", "hero-subtitle", wrap=True)
+        texts.pack_start(self.hero_title, False, False, 0)
+        texts.pack_start(self.hero_subtitle, False, False, 0)
+        hero_row.pack_start(texts, True, True, 0)
+        self.recommended_button = button(
+            T("turn_on_recommended"), self.on_recommended, "suggested-action", "hero-button",
+            icon_name="security-high-symbolic",
+        )
+        self.recommended_button.set_halign(Gtk.Align.START)
+        self.recommended_button.set_tooltip_text(T("recommended_tooltip"))
+        texts.pack_start(self.recommended_button, False, False, 8)
+        self.hero.pack_start(hero_row, False, False, 0)
+        page.pack_start(self.hero, False, False, 0)
+
+        layers = card(10)
+        layers.pack_start(label(T("layers_title"), "card-title"), False, False, 0)
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8, column_homogeneous=True)
+        self.layer_widgets: dict[str, tuple[Gtk.Image, Gtk.Label]] = {}
+        for index, (key, _) in enumerate(protection_layers({})):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            add_classes(row, "layer")
+            image = icon("emblem-ok-symbolic", 16)
+            text = label(T(key), "layer-text")
+            text.set_ellipsize(Pango.EllipsizeMode.END)
+            row.pack_start(image, False, False, 0)
+            row.pack_start(text, True, True, 0)
+            grid.attach(row, index % 2, index // 2, 1, 1)
+            self.layer_widgets[key] = (image, row)
+        layers.pack_start(grid, False, False, 0)
+        page.pack_start(layers, False, False, 0)
+
+        stats = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, homogeneous=True)
+        self.stat_values: dict[str, Gtk.Label] = {}
+        for key in ("stat_blocked", "stat_rules", "stat_ips", "stat_sync"):
+            tile = card(2, "stat")
+            value = label("0", "stat-value")
+            value.set_ellipsize(Pango.EllipsizeMode.END)
+            tile.pack_start(value, False, False, 0)
+            tile.pack_start(label(T(key), "stat-label", wrap=True), False, False, 0)
+            stats.pack_start(tile, True, True, 0)
+            self.stat_values[key] = value
+        page.pack_start(stats, False, False, 0)
+
+        quick = card(10)
+        quick.pack_start(label(T("quick_block_title"), "card-title"), False, False, 0)
+        quick.pack_start(label(T("quick_block_text"), "card-text", wrap=True), False, False, 0)
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.overview_title = Gtk.Label(xalign=0)
-        self.overview_title.set_ellipsize(Pango.EllipsizeMode.END)
-        self.overview_title.get_style_context().add_class("section-title")
-        row.pack_start(self.overview_title, True, True, 0)
-        stats = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.manual_badge = Gtk.Label()
-        self.total_badge = Gtk.Label()
-        self.ip_badge = Gtk.Label()
-        for badge in (self.manual_badge, self.total_badge, self.ip_badge):
-            badge.get_style_context().add_class("badge")
-            stats.pack_start(badge, False, False, 0)
-        row.pack_end(stats, False, False, 0)
-        card.pack_start(row, False, False, 0)
-        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.dns_status = Gtk.Label(xalign=0)
-        self.dns_status.set_ellipsize(Pango.EllipsizeMode.END)
-        self.dns_status.set_tooltip_text(T("browser_note"))
-        status_row.pack_start(self.dns_status, True, True, 0)
-        self.sync_label = Gtk.Label(xalign=1)
-        self.sync_label.get_style_context().add_class("text-box")
-        self.sync_label.set_tooltip_text(T("smart_tracking_tip"))
-        status_row.pack_start(self.sync_label, False, False, 0)
-        sync = icon_button("view-refresh-symbolic", "sync_now", self.on_sync_now)
-        status_row.pack_start(sync, False, False, 0)
-        card.pack_start(status_row, False, False, 0)
-        return card
+        self.quick_entry = Gtk.Entry()
+        self.quick_entry.set_placeholder_text(T("target_hint"))
+        self.quick_entry.connect("activate", lambda *_: self.add_rule(self.quick_entry, "Manual"))
+        row.pack_start(self.quick_entry, True, True, 0)
+        row.pack_start(
+            button(T("block_now"), lambda *_: self.add_rule(self.quick_entry, "Manual"),
+                   "suggested-action", icon_name="list-add-symbolic"),
+            False, False, 0,
+        )
+        quick.pack_start(row, False, False, 0)
+        page.pack_start(quick, False, False, 0)
+        return page
 
-    def build_add_card(self) -> Gtk.Widget:
-        card = self.make_card()
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        header.pack_start(section_title("add_title"), True, True, 0)
-        self.smart_switch = Gtk.Switch(active=True)
-        self.smart_switch.set_valign(Gtk.Align.CENTER)
-        self.smart_switch.set_tooltip_text(T("smart_tracking_tip"))
-        smart_label = Gtk.Label(label=T("smart_tracking"), xalign=0)
-        smart_label.get_style_context().add_class("field-label")
-        smart_label.set_tooltip_text(T("smart_tracking_tip"))
-        header.pack_end(smart_label, False, False, 0)
-        header.pack_end(self.smart_switch, False, False, 0)
-        card.pack_start(header, False, False, 0)
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=9)
+    def build_websites(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        page.pack_start(self.page_header("websites_title", "websites_subtitle"), False, False, 0)
+
+        add = card(10)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.target_entry = Gtk.Entry()
         self.target_entry.set_placeholder_text(T("target_hint"))
-        self.target_entry.connect("activate", self.on_add)
-        self.target_entry.connect("changed", self.on_target_changed)
+        self.target_entry.connect("activate", lambda *_: self.add_rule(self.target_entry, None))
         row.pack_start(self.target_entry, True, True, 0)
         self.category = Gtk.ComboBoxText()
         for key in CATEGORIES:
             self.category.append(key, T(CATEGORY_KEYS[key]))
         self.category.set_active_id("Manual")
         row.pack_start(self.category, False, False, 0)
-        self.add_button = Gtk.Button(label=T("block_now"))
-        self.add_button.get_style_context().add_class("suggested-action")
-        self.add_button.set_sensitive(False)
-        self.add_button.connect("clicked", self.on_add)
-        row.pack_start(self.add_button, False, False, 0)
-        card.pack_start(row, False, False, 0)
-        return card
+        row.pack_start(
+            button(T("block_now"), lambda *_: self.add_rule(self.target_entry, None),
+                   "suggested-action", icon_name="list-add-symbolic"),
+            False, False, 0,
+        )
+        add.pack_start(row, False, False, 0)
+        add.pack_start(label(T("add_help"), "card-text", wrap=True), False, False, 0)
+        page.pack_start(add, False, False, 0)
 
-    def build_adult_card(self) -> Gtk.Widget:
-        card = self.make_card(7)
-        card.get_style_context().add_class("protection-card")
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        icon = Gtk.Image.new_from_icon_name("security-high-symbolic", Gtk.IconSize.LARGE_TOOLBAR)
-        row.pack_start(icon, False, False, 0)
-        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        self.adult_detail = Gtk.Label(xalign=0)
-        self.adult_detail.set_line_wrap(True)
-        self.adult_detail.get_style_context().add_class("text-box")
-        self.adult_detail.set_tooltip_text(T("adult_source"))
-        text_box.pack_start(section_title("adult_title"), False, False, 0)
-        text_box.pack_start(self.adult_detail, False, False, 0)
-        row.pack_start(text_box, True, True, 0)
-        self.update_adult = Gtk.Button(label=T("update_list"))
-        self.update_adult.set_valign(Gtk.Align.CENTER)
-        self.update_adult.connect("clicked", self.on_update_adult)
-        row.pack_start(self.update_adult, False, False, 0)
-        self.adult_switch = Gtk.Switch()
-        self.adult_switch.set_valign(Gtk.Align.CENTER)
-        self.adult_switch.connect("state-set", self.on_adult_toggle)
-        row.pack_start(self.adult_switch, False, False, 0)
-        card.pack_start(row, False, False, 0)
-        return card
-
-    def build_list_card(self) -> Gtk.Widget:
-        card = self.make_card()
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        toolbar.pack_start(section_title("list_title"), True, True, 0)
+        rules = card(10)
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.search = Gtk.SearchEntry()
         self.search.set_placeholder_text(T("search_hint"))
         self.search.set_tooltip_text(T("search_shortcut"))
         self.search.connect("search-changed", self.on_search_changed)
-        toolbar.pack_start(self.search, False, False, 0)
-        toolbar.pack_start(icon_button("document-open-symbolic", "import_rules", self.on_import), False, False, 0)
-        toolbar.pack_start(icon_button("document-save-as-symbolic", "export_rules", self.on_export), False, False, 0)
-        card.pack_start(toolbar, False, False, 0)
+        toolbar.pack_start(self.search, True, True, 0)
+        toolbar.pack_start(button(T("import_action"), self.on_import, icon_name="document-open-symbolic"), False, False, 0)
+        toolbar.pack_start(button(T("export_action"), self.on_export, icon_name="document-save-as-symbolic"), False, False, 0)
+        self.remove_button = button(
+            T("remove_selected"), self.on_remove, "destructive-action", icon_name="edit-delete-symbolic"
+        )
+        self.remove_button.set_sensitive(False)
+        toolbar.pack_start(self.remove_button, False, False, 0)
+        rules.pack_start(toolbar, False, False, 0)
 
         self.model = Gtk.ListStore(str, str, str, str, str, str, str)
         self.filter = self.model.filter_new()
@@ -627,20 +717,23 @@ class MainWindow(Gtk.Window):
         self.tree.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
         self.tree.get_selection().connect("changed", self.on_selection_changed)
         self.tree.connect("key-press-event", self.on_tree_key)
-        blocked_renderer = Gtk.CellRendererText(weight=Pango.Weight.BOLD, foreground="#d92f45")
+        blocked_renderer = Gtk.CellRendererText(weight=Pango.Weight.BOLD, foreground="#dc2626")
         blocked_column = Gtk.TreeViewColumn(T("column_status"), blocked_renderer, text=COL_STATUS)
-        blocked_column.set_resizable(True)
         self.tree.append_column(blocked_column)
         for title_key, column, expand in [
             ("column_target", COL_TARGET, True),
-            ("column_type", COL_TYPE, False),
+            # Type is implied by Coverage and still searchable; the table
+            # must fit next to the sidebar at the minimum window width.
             ("column_category", COL_CATEGORY, False),
             ("column_coverage", COL_COVERAGE, True),
             ("column_added", COL_ADDED, False),
         ]:
             renderer = Gtk.CellRendererText()
+            renderer.set_padding(6, 6)
             if expand:
+                # Ellipsized cells otherwise request their full natural width.
                 renderer.set_property("ellipsize", Pango.EllipsizeMode.END)
+                renderer.set_property("width-chars", 16)
             tree_column = Gtk.TreeViewColumn(T(title_key), renderer, text=column)
             tree_column.set_expand(expand)
             tree_column.set_resizable(True)
@@ -648,104 +741,141 @@ class MainWindow(Gtk.Window):
             self.tree.append_column(tree_column)
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_min_content_height(90)
+        scroll.set_min_content_height(260)
+        add_classes(scroll, "list-frame")
         scroll.add(self.tree)
-        card.pack_start(scroll, True, True, 0)
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.list_summary = Gtk.Label(xalign=0)
-        self.list_summary.set_ellipsize(Pango.EllipsizeMode.END)
-        self.list_summary.get_style_context().add_class("text-box")
-        actions.pack_start(self.list_summary, True, True, 0)
-        self.remove_button = Gtk.Button(label=T("remove_selected"))
-        self.remove_button.get_style_context().add_class("destructive-action")
-        self.remove_button.set_sensitive(False)
-        self.remove_button.connect("clicked", self.on_remove)
-        actions.pack_end(self.remove_button, False, False, 0)
-        card.pack_start(actions, False, False, 0)
-        return card
+        rules.pack_start(scroll, True, True, 0)
+        self.list_summary = label("", "card-text")
+        rules.pack_start(self.list_summary, False, False, 0)
+        page.pack_start(rules, True, True, 0)
+        return page
 
-    def build_squid_page(self) -> Gtk.Widget:
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
-        page.set_border_width(2)
+    def build_categories(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        page.pack_start(self.page_header("categories_title", "categories_subtitle"), False, False, 0)
 
-        status_card = self.make_card(6)
-        status_card.get_style_context().add_class("protection-card")
-        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=9)
-        icon = Gtk.Image.new_from_icon_name("network-server-symbolic", Gtk.IconSize.LARGE_TOOLBAR)
-        status_row.pack_start(icon, False, False, 0)
-        heading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        self.squid_status = Gtk.Label(xalign=0)
-        heading_box.pack_start(section_title("squid_title"), False, False, 0)
-        heading_box.pack_start(self.squid_status, False, False, 0)
-        status_row.pack_start(heading_box, True, True, 0)
+        lists = card(0, "list-card")
+        self.list_switches: dict[str, Gtk.Switch] = {}
+        self.list_details: dict[str, Gtk.Label] = {}
+        for index, (key, icon_name) in enumerate(LIST_ROWS):
+            if index:
+                lists.pack_start(Gtk.Separator(), False, False, 0)
+            switch, detail = self.toggle_row(
+                lists, icon_name, f"list_{key}_title", f"list_{key}_text", self.on_list_toggle, key
+            )
+            self.list_switches[key] = switch
+            self.list_details[key] = detail
+        page.pack_start(lists, False, False, 0)
+
+        strict = card(0, "list-card")
+        self.strict_switch, self.strict_detail = self.toggle_row(
+            strict, "channel-secure-symbolic", "strict_title", "strict_text", self.on_strict_toggle, None
+        )
+        page.pack_start(strict, False, False, 0)
+
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        footer.pack_start(label(T("lists_auto_update"), "card-text", wrap=True), True, True, 0)
+        self.update_lists_button = button(T("update_lists"), self.on_update_lists, icon_name="view-refresh-symbolic")
+        footer.pack_end(self.update_lists_button, False, False, 0)
+        page.pack_start(footer, False, False, 0)
+        page.pack_start(label(T("lists_source"), "fine-print", wrap=True), False, False, 0)
+        return page
+
+    def toggle_row(self, parent: Gtk.Box, icon_name: str, title_key: str, text_key: str, callback, data):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        add_classes(row, "toggle-row")
+        badge = Gtk.Box()
+        add_classes(badge, "row-icon")
+        badge.set_valign(Gtk.Align.CENTER)
+        badge.pack_start(icon(icon_name, 20), True, True, 0)
+        row.pack_start(badge, False, False, 0)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        texts.set_valign(Gtk.Align.CENTER)
+        texts.pack_start(label(T(title_key), "row-title"), False, False, 0)
+        texts.pack_start(label(T(text_key), "row-text", wrap=True), False, False, 0)
+        detail = label("", "row-detail")
+        texts.pack_start(detail, False, False, 0)
+        row.pack_start(texts, True, True, 0)
+        switch = Gtk.Switch()
+        switch.set_valign(Gtk.Align.CENTER)
+        switch.connect("state-set", callback, data)
+        row.pack_end(switch, False, False, 0)
+        parent.pack_start(row, False, False, 0)
+        return switch, detail
+
+    def build_advanced(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        page.pack_start(self.page_header("advanced_title", "advanced_subtitle"), False, False, 0)
+
+        smart = card(0, "list-card")
+        self.smart_switch, self.smart_detail = self.toggle_row(
+            smart, "view-refresh-symbolic", "smart_tracking", "smart_tracking_tip", self.on_smart_default, None
+        )
+        sync_switch(self.smart_switch, True)
+        sync_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        add_classes(sync_row, "row-actions")
+        self.dns_status = label("", "pill")
+        sync_row.pack_start(self.dns_status, False, False, 0)
+        sync_row.pack_end(button(T("sync_now"), self.on_sync_now, icon_name="view-refresh-symbolic"), False, False, 0)
+        smart.pack_start(sync_row, False, False, 0)
+        page.pack_start(smart, False, False, 0)
+
+        squid = card(10)
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        texts.pack_start(label(T("squid_title"), "card-title"), False, False, 0)
+        self.squid_status = label("", "pill")
+        self.squid_status.set_halign(Gtk.Align.START)
+        texts.pack_start(self.squid_status, False, False, 0)
+        head.pack_start(texts, True, True, 0)
         self.squid_switch = Gtk.Switch()
         self.squid_switch.set_valign(Gtk.Align.CENTER)
         self.squid_switch.connect("state-set", self.on_squid_toggle)
-        status_row.pack_end(self.squid_switch, False, False, 0)
-        status_card.pack_start(status_row, False, False, 0)
-        description = Gtk.Label(label=T("squid_description"), xalign=0)
-        description.set_line_wrap(True)
-        description.get_style_context().add_class("info-box")
-        status_card.pack_start(description, False, False, 0)
-        page.pack_start(status_card, False, False, 0)
-
-        commands_card = self.make_card(5)
-        commands_card.pack_start(section_title("squid_commands_title"), False, False, 0)
-        commands = Gtk.Label(label=T("squid_commands"), xalign=0)
+        head.pack_end(self.squid_switch, False, False, 0)
+        squid.pack_start(head, False, False, 0)
+        squid.pack_start(label(T("squid_description"), "card-text", wrap=True), False, False, 0)
+        commands = label(T("squid_commands"), "code-box")
         commands.set_selectable(True)
-        commands.get_style_context().add_class("code-box")
-        commands_card.pack_start(commands, False, False, 0)
-        page.pack_start(commands_card, False, False, 0)
-
-        keyword_card = self.make_card(6)
-        keyword_card.pack_start(section_title("squid_keywords_title"), False, False, 0)
+        squid.pack_start(commands, False, False, 0)
         add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.squid_keyword_entry = Gtk.Entry()
         self.squid_keyword_entry.set_placeholder_text(T("squid_keyword_hint"))
         self.squid_keyword_entry.connect("activate", self.on_squid_add_keyword)
         add_row.pack_start(self.squid_keyword_entry, True, True, 0)
-        add_keyword = Gtk.Button(label=T("squid_add_keyword"))
-        add_keyword.get_style_context().add_class("suggested-action")
-        add_keyword.connect("clicked", self.on_squid_add_keyword)
-        add_row.pack_start(add_keyword, False, False, 0)
-        keyword_card.pack_start(add_row, False, False, 0)
-
-        self.squid_model = Gtk.ListStore(str)
-        self.squid_tree = Gtk.TreeView(model=self.squid_model)
-        self.squid_tree.set_headers_visible(False)
-        self.squid_tree.connect("key-press-event", self.on_squid_tree_key)
-        keyword_renderer = Gtk.CellRendererText()
-        self.squid_tree.append_column(Gtk.TreeViewColumn(T("squid_keyword_column"), keyword_renderer, text=0))
-        keyword_scroll = Gtk.ScrolledWindow()
-        keyword_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        keyword_scroll.set_min_content_height(80)
-        keyword_scroll.add(self.squid_tree)
-        keyword_card.pack_start(keyword_scroll, True, True, 0)
+        add_row.pack_start(button(T("squid_add_keyword"), self.on_squid_add_keyword, icon_name="list-add-symbolic"), False, False, 0)
+        squid.pack_start(add_row, False, False, 0)
+        self.squid_flow = Gtk.FlowBox()
+        self.squid_flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.squid_flow.set_max_children_per_line(12)
+        self.squid_flow.set_row_spacing(6)
+        self.squid_flow.set_column_spacing(6)
+        squid.pack_start(self.squid_flow, False, False, 0)
         remove_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.squid_count = Gtk.Label(xalign=0)
-        self.squid_count.get_style_context().add_class("text-box")
+        self.squid_count = label("", "card-text")
         remove_row.pack_start(self.squid_count, True, True, 0)
-        remove_keyword = Gtk.Button(label=T("squid_remove_keyword"))
-        remove_keyword.get_style_context().add_class("destructive-action")
-        remove_keyword.connect("clicked", self.on_squid_remove_keyword)
-        remove_row.pack_end(remove_keyword, False, False, 0)
-        keyword_card.pack_start(remove_row, False, False, 0)
-        page.pack_start(keyword_card, True, True, 0)
-        return page
+        remove_row.pack_end(
+            button(T("squid_remove_keyword"), self.on_squid_remove_keyword, "destructive-action",
+                   icon_name="edit-delete-symbolic"),
+            False, False, 0,
+        )
+        squid.pack_start(remove_row, False, False, 0)
+        page.pack_start(squid, False, False, 0)
 
-    def build_footer(self) -> Gtk.Widget:
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        note = Gtk.Label(label=T("persistent_note"), xalign=0)
-        note.set_ellipsize(Pango.EllipsizeMode.END)
-        note.set_tooltip_text(T("persistent_note"))
-        note.get_style_context().add_class("info-box")
-        row.pack_start(note, True, True, 0)
-        self.operation_label = Gtk.Label(label=T("ready"))
-        self.operation_label.set_max_width_chars(40)
-        self.operation_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        set_state_class(self.operation_label, "ok")
-        row.pack_end(self.operation_label, False, False, 0)
-        return row
+        account = card(10)
+        account_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        account_texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        account_texts.pack_start(label(T("account_title"), "card-title"), False, False, 0)
+        account_texts.pack_start(label(T("account_text"), "card-text", wrap=True), False, False, 0)
+        account_row.pack_start(account_texts, True, True, 0)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_valign(Gtk.Align.CENTER)
+        actions.pack_start(button(T("change_account"), self.on_change_account, icon_name="avatar-default-symbolic"), False, False, 0)
+        actions.pack_start(button(T("about"), self.on_about, icon_name="help-about-symbolic"), False, False, 0)
+        account_row.pack_end(actions, False, False, 0)
+        account.pack_start(account_row, False, False, 0)
+        page.pack_start(account, False, False, 0)
+        page.pack_start(label(T("browser_note"), "fine-print", wrap=True), False, False, 0)
+        return page
 
     # ------------------------------------------------------------------ state
 
@@ -758,6 +888,12 @@ class MainWindow(Gtk.Window):
 
     def load_status(self, status: dict) -> None:
         self.status = status
+        self.load_rules(status)
+        self.load_dashboard(status)
+        self.load_categories(status)
+        self.load_advanced(status)
+
+    def load_rules(self, status: dict) -> None:
         self.model.clear()
         for entry in status.get("entries", []):
             kind = entry.get("kind", "")
@@ -780,44 +916,82 @@ class MainWindow(Gtk.Window):
                     str(entry.get("created_at", ""))[:10],
                 ]
             )
-        manual = int(status.get("manual_count", 0))
-        tracked = int(status.get("tracked_ip_count", 0))
-        self.manual_badge.set_text(T("manual_badge", count=f"{manual:,}"))
-        self.total_badge.set_text(T("total_badge", count=f"{int(status.get('total_count', manual)):,}"))
-        self.ip_badge.set_text(T("ip_badge", count=f"{tracked:,}"))
+        self.update_list_summary()
+        self.on_selection_changed()
 
-        adult = status.get("adult_protection", {})
-        enabled = bool(adult.get("enabled"))
-        protecting = manual > 0 or enabled
-        self.overview_title.set_markup(
-            "<b>"
-            + GLib.markup_escape_text(T("overview_title" if protecting else "overview_title_idle"))
-            + "</b>"
-        )
+    def load_dashboard(self, status: dict) -> None:
+        layers = protection_layers(status)
+        active = sum(1 for _, on in layers if on)
+        if active == len(layers):
+            state, title, icon_name = "ok", "hero_strong", "security-high-symbolic"
+        elif active >= 3:
+            state, title, icon_name = "warning", "hero_partial", "security-medium-symbolic"
+        else:
+            state, title, icon_name = "error", "hero_weak", "security-low-symbolic"
+        context = self.hero.get_style_context()
+        for name in ("hero-ok", "hero-warning", "hero-error"):
+            context.remove_class(name)
+        context.add_class(f"hero-{state}")
+        self.hero_icon.set_from_icon_name(icon_name, Gtk.IconSize.BUTTON)
+        self.hero_title.set_text(T(title))
+        self.hero_subtitle.set_text(T("hero_layers", active=active, total=len(layers)))
+        self.recommended_button.set_visible(not recommended_active(status))
+        for key, on in layers:
+            image, row = self.layer_widgets[key]
+            image.set_from_icon_name("emblem-ok-symbolic" if on else "window-close-symbolic", Gtk.IconSize.BUTTON)
+            row_context = row.get_style_context()
+            row_context.remove_class("layer-on")
+            row_context.remove_class("layer-off")
+            row_context.add_class("layer-on" if on else "layer-off")
+
+        self.stat_values["stat_blocked"].set_text(f"{int(status.get('total_count', 0)):,}")
+        self.stat_values["stat_rules"].set_text(f"{int(status.get('manual_count', 0)):,}")
+        self.stat_values["stat_ips"].set_text(f"{int(status.get('tracked_ip_count', 0)):,}")
+        last_sync = local_time(status.get("smart_sync", {}).get("last_run"))
+        self.stat_values["stat_sync"].set_text(short_time(status.get("smart_sync", {}).get("last_run")))
+        self.stat_values["stat_sync"].set_tooltip_text(last_sync or T("sync_never"))
+
+    def load_categories(self, status: dict) -> None:
+        self.refreshing = True
+        lists = status.get("lists", {})
+        any_enabled = False
+        for key, _ in LIST_ROWS:
+            settings = lists.get(key, {})
+            enabled = bool(settings.get("enabled"))
+            any_enabled = any_enabled or enabled
+            sync_switch(self.list_switches[key], enabled)
+            if enabled:
+                updated = local_time(settings.get("updated_at"))[:10]
+                self.list_details[key].set_text(
+                    T("list_on", count=f"{int(settings.get('domain_count', 0)):,}", date=updated)
+                )
+                set_state_class(self.list_details[key], "ok")
+            else:
+                self.list_details[key].set_text(T("list_off"))
+                set_state_class(self.list_details[key], "warning")
+        strict = bool(status.get("strict_mode", {}).get("enabled"))
+        sync_switch(self.strict_switch, strict)
+        self.strict_detail.set_text(T("strict_on") if strict else T("strict_off"))
+        set_state_class(self.strict_detail, "ok" if strict else "warning")
+        self.update_lists_button.set_sensitive(any_enabled)
+        self.refreshing = False
+
+    def load_advanced(self, status: dict) -> None:
+        self.refreshing = True
         dns_engine = bool(status.get("dns_engine"))
         self.dns_status.set_text(T("dns_active" if dns_engine else "dns_fallback"))
         set_state_class(self.dns_status, "ok" if dns_engine else "warning")
         last_sync = local_time(status.get("smart_sync", {}).get("last_run"))
-        self.sync_label.set_text(T("sync_last", date=last_sync) if last_sync else T("sync_never"))
-        self.update_list_summary()
-
-        updated = adult.get("updated_at")
-        suffix = T("updated_suffix", date=str(updated)[:10]) if updated else ""
-        self.adult_detail.set_text(
-            T("adult_on", count=f"{int(adult.get('domain_count', 0)):,}", updated=suffix)
-            if enabled
-            else T("adult_off")
-        )
-        adult_context = self.adult_detail.get_style_context()
-        adult_context.remove_class("blocked-summary")
-        if enabled:
-            adult_context.add_class("blocked-summary")
+        self.smart_detail.set_text(T("sync_last", date=last_sync) if last_sync else T("sync_never"))
 
         squid = status.get("squid_proxy", {})
-        self.squid_model.clear()
-        keywords = squid.get("keywords", [])
+        for child in self.squid_flow.get_children():
+            self.squid_flow.remove(child)
+        keywords = [str(keyword) for keyword in squid.get("keywords", [])]
         for keyword in keywords:
-            self.squid_model.append([str(keyword)])
+            chip = label(keyword, "chip", xalign=0.5)
+            self.squid_flow.add(chip)
+        self.squid_flow.show_all()
         self.squid_count.set_text(T("squid_keyword_count", count=len(keywords)))
         squid_enabled = bool(squid.get("enabled"))
         squid_running = bool(squid.get("running"))
@@ -827,23 +1001,14 @@ class MainWindow(Gtk.Window):
         elif squid_enabled:
             squid_text, squid_state = "squid_status_stopped", "warning"
         elif squid_installed:
-            squid_text, squid_state = "squid_status_off", "ok"
+            squid_text, squid_state = "squid_status_off", "warning"
         else:
             squid_text, squid_state = "squid_status_missing", "error"
         self.squid_status.set_text(T(squid_text))
         set_state_class(self.squid_status, squid_state)
-
-        self.refreshing = True
-        self.adult_switch.set_active(enabled)
-        self.squid_switch.set_active(squid_enabled)
+        sync_switch(self.squid_switch, squid_enabled)
         self.squid_switch.set_sensitive(squid_installed or squid_enabled)
         self.refreshing = False
-        self.update_adult.set_sensitive(enabled)
-        self.on_selection_changed()
-
-    def on_search_changed(self, *_args) -> None:
-        self.filter.refilter()
-        self.update_list_summary()
 
     def update_list_summary(self) -> None:
         total = len(self.model)
@@ -856,14 +1021,51 @@ class MainWindow(Gtk.Window):
             text = T("rules_shown_filtered", shown=shown, count=total)
         self.list_summary.set_text(text)
 
-    def set_busy(self, active: bool, text: str, state: str = "ok") -> None:
+    def select_page(self, name: str) -> None:
+        self.nav_buttons[name].set_active(True)
+
+    def on_nav_toggled(self, nav: Gtk.ToggleButton, name: str) -> None:
+        if self.switching_page:
+            return
+        self.switching_page = True
+        # Exactly one page is selected; clicking the current page keeps it on.
+        for other, other_button in self.nav_buttons.items():
+            other_button.set_active(other == name)
+        self.switching_page = False
+        self.stack.set_visible_child_name(name)
+        if name == "websites":
+            self.target_entry.grab_focus()
+        elif name == "dashboard":
+            self.quick_entry.grab_focus()
+
+    def show_toast(self, text: str, state: str = "ok") -> None:
+        self.toast_label.set_text(text)
+        self.toast_icon.set_from_icon_name(
+            {"ok": "emblem-ok-symbolic", "warning": "dialog-warning-symbolic"}.get(state, "dialog-error-symbolic"),
+            Gtk.IconSize.BUTTON,
+        )
+        context = self.toast_box.get_style_context()
+        for name in ("toast-ok", "toast-warning", "toast-error"):
+            context.remove_class(name)
+        context.add_class(f"toast-{state}")
+        self.toast_revealer.set_reveal_child(True)
+        if self.toast_timer:
+            GLib.source_remove(self.toast_timer)
+
+        def hide() -> bool:
+            self.toast_revealer.set_reveal_child(False)
+            self.toast_timer = 0
+            return False
+
+        self.toast_timer = GLib.timeout_add_seconds(TOAST_SECONDS, hide)
+
+    def set_busy(self, active: bool, text: str = "") -> None:
         self.busy_active = active
-        self.content.set_sensitive(not active)
-        for control in self.header_controls:
-            control.set_sensitive(not active)
+        self.stack.set_sensitive(not active)
+        for widget in (*self.nav_buttons.values(), self.language_combo, self.lock_button):
+            widget.set_sensitive(not active)
         self.busy.start() if active else self.busy.stop()
-        self.operation_label.set_text(text)
-        set_state_class(self.operation_label, "warning" if active else state)
+        self.busy_label.set_text(text if active else "")
         if not active:
             self.last_activity = time.monotonic()
 
@@ -880,16 +1082,17 @@ class MainWindow(Gtk.Window):
         self.set_busy(True, T(busy_key))
 
         def done(result, error) -> bool:
+            self.set_busy(False)
             if error:
-                self.set_busy(False, T("operation_failed"), "error")
+                self.show_toast(T("operation_failed"), "error")
                 message(self, T(failure_title_key), error, error=True)
                 try:
                     self.load_status(helper_call("status"))
                 except AppError:
-                    pass
+                    self.load_status(self.status)
             else:
                 self.load_status(result)
-                self.set_busy(False, T(done_key))
+                self.show_toast(T(done_key))
                 if on_success:
                     on_success(result)
             return False
@@ -902,37 +1105,68 @@ class MainWindow(Gtk.Window):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    # ------------------------------------------------------------------ protection
+
+    def configure(self, payload: dict, busy_key: str = "applying") -> None:
+        needs_download = any(payload.get("lists", {}).values()) or payload.get("refresh")
+        self.run_helper(
+            "protection-configure",
+            payload,
+            "downloading" if needs_download else busy_key,
+            "protection_updated",
+            "protection_failed_title",
+        )
+
+    def on_recommended(self, *_args) -> None:
+        if confirm(self, T("recommended_confirm_title"), T("recommended_confirm_body"), "turn_on"):
+            self.configure({"lists": {key: True for key in RECOMMENDED_LISTS}, "strict": True})
+
+    def on_list_toggle(self, switch: Gtk.Switch, requested: bool, key: str) -> bool:
+        if self.refreshing:
+            return False
+        self.configure({"lists": {key: requested}})
+        return True  # The switch moves when the helper reports the new state.
+
+    def on_strict_toggle(self, switch: Gtk.Switch, requested: bool, _data) -> bool:
+        if self.refreshing:
+            return False
+        if not requested and not confirm(self, T("strict_disable_title"), T("strict_disable_body"), "turn_off"):
+            self.refreshing = True
+            sync_switch(switch, True)
+            self.refreshing = False
+            return True
+        self.configure({"strict": requested})
+        return True
+
+    def on_update_lists(self, *_args) -> None:
+        self.configure({"refresh": True})
+
+    def on_smart_default(self, switch: Gtk.Switch, requested: bool, _data) -> bool:
+        return False  # Local preference for new rules; nothing to apply.
+
     # ------------------------------------------------------------------ rules
 
-    def on_target_changed(self, *_args) -> None:
-        self.add_button.set_sensitive(bool(self.target_entry.get_text().strip()))
-
-    def on_add(self, *_args) -> None:
-        raw = self.target_entry.get_text()
+    def add_rule(self, entry: Gtk.Entry, category: str | None) -> None:
+        raw = entry.get_text()
         if not raw.strip():
+            entry.grab_focus()
             return
         try:
-            normalized, kind = normalize_target(raw)
+            rule_target(raw)
         except ValidationError as exc:
             message(self, T("invalid_target_title"), T(exc.code), error=True)
-            return
-        if not confirm(
-            self,
-            T("confirm_add_title"),
-            T("confirm_add_body", target=normalized, kind=T(TYPE_KEYS.get(kind, kind))),
-        ):
             return
         self.run_helper(
             "add",
             {
                 "target": raw,
-                "category": self.category.get_active_id() or "Manual",
+                "category": category or self.category.get_active_id() or "Manual",
                 "smart": self.smart_switch.get_active(),
             },
             "applying",
             "applied",
             "add_failed_title",
-            on_success=lambda _result: self.target_entry.set_text(""),
+            on_success=lambda _result: entry.set_text(""),
         )
 
     def selected_rules(self) -> list[tuple[str, str]]:
@@ -942,16 +1176,19 @@ class MainWindow(Gtk.Window):
     def on_selection_changed(self, *_args) -> None:
         self.remove_button.set_sensitive(bool(self.selected_rules()))
 
+    def on_search_changed(self, *_args) -> None:
+        self.filter.refilter()
+        self.update_list_summary()
+
     def on_remove(self, *_args) -> None:
         selected = self.selected_rules()
         if not selected:
-            message(self, T("select_rule_title"), T("select_rule_body"))
             return
         if len(selected) == 1:
             body = T("confirm_remove_body", target=selected[0][1])
         else:
             body = T("confirm_remove_many_body", count=len(selected))
-        if not confirm(self, T("confirm_remove_title"), body):
+        if not confirm(self, T("confirm_remove_title"), body, "remove"):
             return
         self.run_helper(
             "remove", {"ids": [entry_id for entry_id, _ in selected]},
@@ -995,20 +1232,18 @@ class MainWindow(Gtk.Window):
         if len(items) > MAX_IMPORT_ITEMS:
             message(self, T("import_failed_title"), T("err_import_large"), error=True)
             return
-        if not confirm(self, T("import_confirm_title", count=len(items)), T("import_confirm_body")):
+        if not confirm(self, T("import_confirm_title", count=len(items)), T("import_confirm_body"), "import_action"):
             return
 
         def summary(result: dict) -> None:
             counts = result.get("import_result", {})
-            message(
-                self,
-                T("import_done_title"),
+            self.show_toast(
                 T(
                     "import_done_body",
                     added=counts.get("added", 0),
                     skipped=counts.get("skipped", 0),
                     invalid=counts.get("invalid", 0),
-                ),
+                )
             )
 
         self.run_helper(
@@ -1023,7 +1258,7 @@ class MainWindow(Gtk.Window):
     def on_export(self, *_args) -> None:
         entries = self.status.get("entries", [])
         if not entries:
-            message(self, T("export_failed_title"), T("no_rules"))
+            self.show_toast(T("no_rules"), "warning")
             return
         chooser = Gtk.FileChooserNative.new(
             T("export_rules"), self, Gtk.FileChooserAction.SAVE, T("export_action"), T("cancel")
@@ -1040,65 +1275,26 @@ class MainWindow(Gtk.Window):
         except OSError as exc:
             message(self, T("export_failed_title"), str(exc), error=True)
             return
-        self.operation_label.set_text(T("export_done_body", count=len(entries), path=path))
-        set_state_class(self.operation_label, "ok")
+        self.show_toast(T("export_done_body", count=len(entries), path=path))
 
     def on_sync_now(self, *_args) -> None:
         self.run_helper("sync-smart-ips", None, "syncing", "synced", "sync_failed_title")
 
-    # ------------------------------------------------------------------ adult
-
-    def on_adult_toggle(self, _switch, requested: bool) -> bool:
-        if self.refreshing:
-            return False
-        current = bool(self.status.get("adult_protection", {}).get("enabled"))
-        if requested == current:
-            return False
-        accepted = confirm(
-            self,
-            T("adult_enable_title" if requested else "adult_disable_title"),
-            T("adult_enable_body" if requested else "adult_disable_body"),
-        )
-        if not accepted:
-            self.refreshing = True
-            self.adult_switch.set_active(current)
-            self.refreshing = False
-            return True
-        self.run_adult_action("adult-enable" if requested else "adult-disable")
-        return True
-
-    def on_update_adult(self, *_args) -> None:
-        if confirm(self, T("adult_update_title"), T("adult_update_body")):
-            self.run_adult_action("adult-update")
-
-    def run_adult_action(self, action: str) -> None:
-        self.run_helper(
-            action,
-            None,
-            "releasing" if action == "adult-disable" else "downloading",
-            "updated",
-            "adult_failed_title",
-        )
-
     # ------------------------------------------------------------------ squid
 
     def current_squid_keywords(self) -> list[str]:
-        return [str(row[0]) for row in self.squid_model]
+        return [str(keyword) for keyword in self.status.get("squid_proxy", {}).get("keywords", [])]
 
-    def on_squid_toggle(self, _switch, requested: bool) -> bool:
+    def on_squid_toggle(self, switch: Gtk.Switch, requested: bool) -> bool:
         if self.refreshing:
             return False
-        current = bool(self.status.get("squid_proxy", {}).get("enabled"))
-        if requested == current:
-            return False
-        accepted = confirm(
+        if not confirm(
             self,
             T("squid_enable_title" if requested else "squid_disable_title"),
             T("squid_enable_body" if requested else "squid_disable_body"),
-        )
-        if not accepted:
+        ):
             self.refreshing = True
-            self.squid_switch.set_active(current)
+            sync_switch(switch, not requested)
             self.refreshing = False
             return True
         self.run_squid_update(requested, self.current_squid_keywords())
@@ -1107,34 +1303,28 @@ class MainWindow(Gtk.Window):
     def on_squid_add_keyword(self, *_args) -> None:
         keyword = " ".join(self.squid_keyword_entry.get_text().strip().lower().split())
         if not keyword:
-            message(self, T("squid_invalid_title"), T("err_squid_keyword"), error=True)
+            self.squid_keyword_entry.grab_focus()
             return
         keywords = self.current_squid_keywords()
         if keyword in keywords:
-            message(self, T("squid_invalid_title"), T("squid_keyword_exists", keyword=keyword))
+            self.show_toast(T("squid_keyword_exists", keyword=keyword), "warning")
             return
         keywords.append(keyword)
         enabled = bool(self.status.get("squid_proxy", {}).get("enabled"))
         self.run_squid_update(enabled, keywords, clear_entry=True)
 
     def on_squid_remove_keyword(self, *_args) -> None:
-        model, tree_iter = self.squid_tree.get_selection().get_selected()
-        if tree_iter is None:
-            message(self, T("squid_select_title"), T("squid_select_body"))
+        selected = self.squid_flow.get_selected_children()
+        if not selected:
+            self.show_toast(T("squid_select_body"), "warning")
             return
-        selected = str(model[tree_iter][0])
-        keywords = [keyword for keyword in self.current_squid_keywords() if keyword != selected]
+        keyword = selected[0].get_child().get_text()
+        keywords = [item for item in self.current_squid_keywords() if item != keyword]
         if not keywords:
             message(self, T("squid_invalid_title"), T("err_squid_keywords_limit"), error=True)
             return
         enabled = bool(self.status.get("squid_proxy", {}).get("enabled"))
         self.run_squid_update(enabled, keywords)
-
-    def on_squid_tree_key(self, _widget, event) -> bool:
-        if event.keyval == Gdk.KEY_Delete:
-            self.on_squid_remove_keyword()
-            return True
-        return False
 
     def run_squid_update(self, enabled: bool, keywords: list[str], clear_entry: bool = False) -> None:
         self.run_helper(
@@ -1150,7 +1340,7 @@ class MainWindow(Gtk.Window):
 
     def on_change_account(self, *_args) -> None:
         if run_account_change(self):
-            message(self, T("account_changed_title"), T("account_changed_body"))
+            self.show_toast(T("account_changed_title"))
 
     def on_about(self, *_args) -> None:
         dialog = Gtk.AboutDialog(transient_for=self, modal=True)
@@ -1179,7 +1369,7 @@ class MainWindow(Gtk.Window):
             return False
         key = Gdk.keyval_to_lower(event.keyval)
         if key == Gdk.KEY_f:
-            self.notebook.set_current_page(0)
+            self.select_page("websites")
             self.search.grab_focus()
             return True
         if key == Gdk.KEY_l:

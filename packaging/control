@@ -8,10 +8,12 @@ Depends: python3 (>= 3.11), python3-gi, python3-dnspython, gir1.2-gtk-3.0, pkexe
 Recommends: lxqt-policykit
 Installed-Size: @INSTALLED_SIZE@
 Homepage: https://edukasaunos.tl
-Description: multilingual web and Squid protection for Edukasaun OS
+Description: parental and school web protection for Edukasaun OS
  Eduka-Block is a lightweight GTK application for parents and teachers.
- Its subtle 3D, theme-adaptive GTK interface combines wildcard DNS, a managed
- /etc/hosts section, persistent nftables rules, periodic smart IP
- synchronization and optional Squid keyword ACLs. Rules can be imported from
- plain lists or hosts files and exported for other computers. The interface
- includes English, Tetum, European and Brazilian Portuguese, and Indonesian.
+ It blocks websites, domains, IP addresses and ranges for every user and
+ browser through wildcard DNS, a managed /etc/hosts section and nftables.
+ One click enables category lists (adult content, gambling, malware, social
+ media), SafeSearch, and protection against encrypted-DNS bypass with
+ browser policies. An optional Squid proxy blocks URL keywords. The
+ interface includes English, Tetum, European and Brazilian Portuguese, and
+ Indonesian.
