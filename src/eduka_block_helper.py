@@ -47,6 +47,7 @@ from eduka_block_data import (
     FIREFOX_POLICIES,
     FIREFOX_POLICY_PATH,
     MAX_LIST_DOMAINS,
+    PLATFORM_FAMILIES,
     SAFE_SEARCH,
 )
 
@@ -59,6 +60,14 @@ HOSTS_BACKUP_PATH = STATE_DIR / "hosts.original-backup"
 DNSMASQ_RULES_PATH = Path("/etc/NetworkManager/dnsmasq.d/eduka-block.conf")
 DNSMASQ_LISTS_PATH = Path("/etc/NetworkManager/dnsmasq.d/eduka-block-lists.conf")
 RESOLV_CONF_PATH = Path("/etc/resolv.conf")
+# Routes systemd-resolved (127.0.0.53) through NetworkManager's filtering
+# dnsmasq. Without it, systems that use resolved never consult the filter.
+RESOLVED_DROPIN_PATH = Path("/etc/systemd/resolved.conf.d/eduka-block.conf")
+DNSMASQ_ADDRESS = "127.0.0.1"
+RESOLVED_STUB = "127.0.0.53"
+# dnsmasq answers this name only when it runs with Eduka-Block's rules.
+HEALTH_CHECK_NAME = "eduka-block-check.invalid"
+HEALTH_CHECK_ADDRESS = "127.0.0.254"
 NETWORKMANAGER_CONFIG = Path("/etc/NetworkManager/conf.d/90-eduka-block-dns.conf")
 SQUID_MAIN_CONFIG = Path("/etc/squid/squid.conf")
 SQUID_CONFIG_PATH = Path("/etc/squid/eduka-block.conf")
@@ -416,9 +425,24 @@ def strict_enabled(state: dict) -> bool:
     return bool(state.get("strict_mode", {}).get("enabled"))
 
 
+def related_domains(domain: str) -> set[str]:
+    """Companion domains of a big platform (video CDNs, short links, APIs).
+
+    Blocking only "tiktok.com" leaves the app and the website working through
+    "tiktokv.com", "tiktokcdn.com" and others, so a rule for any member of a
+    family blocks the whole family.
+    """
+    for family in PLATFORM_FAMILIES:
+        if any(domain == member or domain.endswith("." + member) for member in family):
+            return set(family)
+    return set()
+
+
 def wildcard_blocked_domains(state: dict) -> set[str]:
     """Domains blocked together with all of their subdomains."""
     domains = set(manual_domains(state))
+    for domain in list(domains):
+        domains.update(related_domains(domain))
     if strict_enabled(state):
         domains.update(DOH_HOSTNAMES)
     return domains
@@ -445,20 +469,101 @@ def safe_search_records(state: dict, blocked: set[str]) -> list[tuple[str, str]]
     return records
 
 
-def detect_dns_mode(resolv_path: Path | None = None) -> str:
-    """"dnsmasq" when NetworkManager's dnsmasq is the system resolver, else "hosts"."""
+def resolv_nameservers(resolv_path: Path | None = None) -> list[str]:
     resolv_path = resolv_path or RESOLV_CONF_PATH
-    if not NETWORKMANAGER_CONFIG.exists():
-        return "hosts"
     try:
         content = resolv_path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
+        return []
+    return [
+        parts[1]
+        for parts in (line.split() for line in content.splitlines())
+        if len(parts) >= 2 and parts[0] == "nameserver"
+    ]
+
+
+def dnsmasq_answers() -> bool:
+    """True when NetworkManager's dnsmasq is running with Eduka-Block's rules."""
+    try:
+        import dns.exception
+        import dns.resolver
+    except ImportError:
+        return False
+    resolver = dns.resolver.Resolver(configure=False)
+    resolver.nameservers = [DNSMASQ_ADDRESS]
+    resolver.timeout = 1.0
+    resolver.lifetime = 2.0
+    try:
+        answer = resolver.resolve(HEALTH_CHECK_NAME, "A", search=False)
+    except (dns.exception.DNSException, OSError):
+        return False
+    return any(item.to_text() == HEALTH_CHECK_ADDRESS for item in answer)
+
+
+def detect_dns_mode(resolv_path: Path | None = None) -> str:
+    """"dnsmasq" when the filtering dnsmasq serves the system's lookups, else "hosts".
+
+    That is the case when /etc/resolv.conf points to it directly, or when it
+    points to systemd-resolved and dnsmasq is healthy, because apply_system()
+    then routes systemd-resolved through dnsmasq.
+    """
+    if not NETWORKMANAGER_CONFIG.exists():
         return "hosts"
-    for line in content.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0] == "nameserver" and parts[1] == "127.0.0.1":
-            return "dnsmasq"
+    nameservers = resolv_nameservers(resolv_path)
+    if DNSMASQ_ADDRESS in nameservers:
+        return "dnsmasq"
+    if RESOLVED_STUB in nameservers and dnsmasq_answers():
+        return "dnsmasq"
     return "hosts"
+
+
+def configure_resolved_bridge() -> bool:
+    """Send systemd-resolved's queries to the filtering dnsmasq, or undo it.
+
+    The bridge is only installed after dnsmasq proved it answers, and removed
+    as soon as it does not, so a stopped dnsmasq never breaks name lookups.
+    Returns True when the bridge is active.
+    """
+    wanted = (
+        NETWORKMANAGER_CONFIG.exists()
+        and RESOLVED_STUB in resolv_nameservers()
+        and dnsmasq_answers()
+    )
+    content = (
+        "# Eduka-Block: send every lookup through NetworkManager's filtering dnsmasq.\n"
+        "[Resolve]\n"
+        f"DNS={DNSMASQ_ADDRESS}\n"
+        "Domains=~.\n"
+    )
+    current = RESOLVED_DROPIN_PATH.read_text(encoding="utf-8") if RESOLVED_DROPIN_PATH.exists() else None
+    if wanted and current != content:
+        RESOLVED_DROPIN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(RESOLVED_DROPIN_PATH, content, 0o644)
+        restart_resolved()
+    elif not wanted and current is not None:
+        RESOLVED_DROPIN_PATH.unlink()
+        restart_resolved()
+    return wanted
+
+
+def restart_resolved() -> None:
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        subprocess.run(
+            [systemctl, "try-restart", "systemd-resolved.service"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+
+def flush_dns_caches() -> None:
+    """Make new rules effective at once instead of after cached answers expire."""
+    resolvectl = shutil.which("resolvectl")
+    if resolvectl:
+        subprocess.run(
+            [resolvectl, "flush-caches"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+        )
 
 
 def render_hosts(
@@ -546,20 +651,20 @@ def render_dnsmasq(
 ) -> None:
     path = path or DNSMASQ_RULES_PATH
     lists_path = lists_path or DNSMASQ_LISTS_PATH
-    lines: list[str] = []
     domains = sorted(wildcard_blocked_domains(state))
-    if domains or strict_enabled(state):
-        lines = [
-            f"# Eduka-Block {APP_VERSION} - generated file",
-            "# Blocks each selected domain and every subdomain.",
-        ]
-        for domain in domains:
-            lines.append(f"local=/{domain}/")
-            lines.append(f"address=/{domain}/0.0.0.0")
-            lines.append(f"address=/{domain}/::")
-        if strict_enabled(state):
-            lines.append("# Tell Firefox not to switch to DNS-over-HTTPS (answers NXDOMAIN).")
-            lines.append(f"address=/{DOH_CANARY}/")
+    lines = [
+        f"# Eduka-Block {APP_VERSION} - generated file",
+        "# Blocks each selected domain and every subdomain.",
+        "# Health check: proves this dnsmasq runs with Eduka-Block's rules.",
+        f"address=/{HEALTH_CHECK_NAME}/{HEALTH_CHECK_ADDRESS}",
+    ]
+    for domain in domains:
+        lines.append(f"local=/{domain}/")
+        lines.append(f"address=/{domain}/0.0.0.0")
+        lines.append(f"address=/{domain}/::")
+    if strict_enabled(state):
+        lines.append("# Tell Firefox not to switch to DNS-over-HTTPS (answers NXDOMAIN).")
+        lines.append(f"address=/{DOH_CANARY}/")
     _write_or_remove(path, lines)
 
     listed: list[str] = []
@@ -912,6 +1017,8 @@ def apply_system(state: dict) -> str:
     apply_firewall(state)
     apply_browser_policies(state)
     reload_dns_plugin(full=True)
+    configure_resolved_bridge()
+    flush_dns_caches()
     return mode
 
 
@@ -1170,11 +1277,18 @@ def public_status() -> dict:
         for settings in state["lists"].values()
         if settings.get("enabled")
     )
-    dns_mode = detect_dns_mode()
+    # The stored mode is refreshed by every apply and sync; probing here would
+    # make each status request wait on DNS.
+    dns_mode = state.get("dns_mode") or "hosts"
     return {
         "version": APP_VERSION,
         "configured": credentials_configured(),
-        "entries": state["entries"],
+        "entries": [
+            {**entry, "related_count": len(related_domains(entry["value"]) - {entry["value"]})}
+            if entry.get("kind") == "domain"
+            else entry
+            for entry in state["entries"]
+        ],
         "lists": state["lists"],
         "strict_mode": {
             "enabled": strict_enabled(state),
@@ -1431,6 +1545,10 @@ def cleanup_system() -> None:
             atomic_write(HOSTS_PATH, cleaned, stat.S_IMODE(file_stat.st_mode))
     except (OSError, UnicodeError, HelperError):
         pass
+    # First stop routing systemd-resolved to dnsmasq, which is going away.
+    if RESOLVED_DROPIN_PATH.exists():
+        RESOLVED_DROPIN_PATH.unlink()
+        restart_resolved()
     for path in (DNSMASQ_RULES_PATH, DNSMASQ_LISTS_PATH):
         try:
             path.unlink()

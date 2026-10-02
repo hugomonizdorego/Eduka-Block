@@ -1,10 +1,18 @@
 <p align="center"><img src="docs/logo.png" width="128" alt="Eduka-Block logo"></p>
 
-# Eduka-Block 0.5.1
+# Eduka-Block 0.5.2
 
 Eduka-Block is the parental and school web-protection app for **Edukasaun OS**. Parents and teachers use it to block pornography, gambling, malware, scams, social media and any other website, domain, IP address or network range that is harmful to children and students. It works for every user and every normal browser on the computer.
 
 ![Dashboard](docs/screenshots/dashboard.png)
+
+## What's new in 0.5.2
+
+- **The subdomain DNS filter now works on systems that use systemd-resolved** (`/etc/resolv.conf` → `127.0.0.53`), as most Ubuntu-based desktops do. Before, those systems never asked the filter, so only `/etc/hosts` protected them: `tiktok.com` and `www.tiktok.com` were blocked, but other subdomains and the platform's other domains were not. Eduka-Block now routes systemd-resolved through the filter, but only after a health check proves that the filter answers. If the filter stops, the route is removed at once, so the internet never breaks.
+- **Platform families**: blocking `tiktok.com` also blocks `tiktokv.com`, `tiktokcdn.com`, `ttwstatic.com`, `byteoversea.com` and the rest of TikTok's domains. The same works for Facebook, Instagram, YouTube, X/Twitter, Snapchat, Discord, Roblox, Reddit, WhatsApp, Telegram, Twitch, Pinterest and Threads.
+- New rules take effect at once: DNS caches are flushed after every change.
+- **Turn on and Turn off**: the dashboard shows *Turn off protection* when protection is on. It turns off every category list and strict mode; your own website rules stay blocked.
+- **Squid Proxy has its own page** with status, setup instructions and the blocked words.
 
 ## What's new in 0.5.1
 
@@ -32,6 +40,8 @@ Eduka-Block is the parental and school web-protection app for **Edukasaun OS**. 
 | **Websites** | **Advanced** |
 | ![Websites](docs/screenshots/websites.png) | ![Advanced](docs/screenshots/advanced.png) |
 
+| **Squid Proxy** | |
+| ![Squid Proxy](docs/screenshots/squid.png) | |
 | **Sign-in** | **Account recovery** |
 | ![Sign-in](docs/screenshots/sign-in.png) | ![Account recovery](docs/screenshots/account-recovery.png) |
 
@@ -64,6 +74,13 @@ No local filter can be 100% bulletproof against someone who has the administrato
 
 The app locks itself after 10 minutes without activity (**Ctrl+L** locks it immediately; **Ctrl+F** searches the rules). Every change asks for the operating-system administrator password through PolicyKit.
 
+## A blocked site still opens: checklist
+
+1. **Dashboard → Protection layers**: *Subdomain DNS filter* should be ✓. If it shows ✗, open **Advanced → Sync IP addresses now**, or restart the computer once after installing. The filter starts after NetworkManager has loaded its DNS plugin.
+2. Turn on **SafeSearch & anti-bypass** (or *Turn on recommended protection*). Without it, a browser that uses encrypted DNS skips every DNS rule.
+3. Close and reopen the browser. Already-open connections can keep working for a short time after a site is blocked.
+4. Make sure children use a **normal (non-administrator)** account: an administrator can change or remove any local protection.
+
 ## Forgotten username or password
 
 The Eduka-Block account protects the app from children and students. The real security boundary is the computer's **administrator (sudo) password**: every change to the protection already needs it. So whoever knows the administrator password can recover the Eduka-Block account. Protection rules are never changed by a recovery.
@@ -91,7 +108,7 @@ If nobody knows the administrator password either, it must be reset first with t
 ### With internet (recommended)
 
 ```bash
-sudo apt install ./eduka-block_0.5.1-1_all.deb
+sudo apt install ./eduka-block_0.5.2-1_all.deb
 ```
 
 APT downloads the dependencies automatically. Upgrading from an older version keeps the account and all rules.
@@ -100,12 +117,12 @@ APT downloads the dependencies automatically. Upgrading from an older version ke
 
 To include Eduka-Block in a customised Edukasaun OS ISO, build the package (or download it from the CI artifacts/releases) and install it in **Cubic's terminal** page:
 
-1. Drag `eduka-block_0.5.1-1_all.deb` into the Cubic terminal window. Cubic copies it into the image's current directory.
+1. Drag `eduka-block_0.5.2-1_all.deb` into the Cubic terminal window. Cubic copies it into the image's current directory.
 2. Install it with its dependencies (Cubic's chroot has internet access):
 
    ```bash
    apt update
-   apt install -y ./eduka-block_0.5.1-1_all.deb
+   apt install -y ./eduka-block_0.5.2-1_all.deb
    ```
 
 3. The installer prints `Eduka-Block: installed into an image; protection starts at the first boot.` Nothing is started inside Cubic, and the host's NetworkManager and services are never touched.
@@ -122,15 +139,15 @@ Each installed computer gets its own Eduka-Block account. Do not copy `credentia
 
 ### Without internet: single-file installer
 
-`eduka-block-0.5.1-offline-trixie-amd64.run` contains Eduka-Block **and every dependency** as a small local package repository:
+`eduka-block-0.5.2-offline-trixie-amd64.run` contains Eduka-Block **and every dependency** as a small local package repository:
 
 ```bash
-sudo sh eduka-block-0.5.1-offline-trixie-amd64.run
+sudo sh eduka-block-0.5.2-offline-trixie-amd64.run
 ```
 
 - APT installs only what the computer is missing, and never downgrades packages.
 - If the computer lacks something that the bundle does not contain, the installer falls back to the internet. Use `--offline-only` to prevent that, or `--extract DIR` to inspect the contents.
-- Check the download with the accompanying `.sha256` file: `sha256sum -c eduka-block-0.5.1-offline-trixie-amd64.run.sha256`.
+- Check the download with the accompanying `.sha256` file: `sha256sum -c eduka-block-0.5.2-offline-trixie-amd64.run.sha256`.
 
 CI builds the offline installer for Debian 13 (Edukasaun OS) inside a `debian:trixie` container on every push. It also tests the installer on a clean minimal Debian 13, and attaches it to the GitHub release when a `v*` tag is pushed. To build it yourself on a Debian 13 machine or container:
 
@@ -160,6 +177,7 @@ English (International) is the default. Tetum, Português (Portugal), Português
 | `/etc/NetworkManager/conf.d/90-eduka-block-dns.conf` | Turns on NetworkManager's dnsmasq plugin |
 | `/etc/NetworkManager/dnsmasq.d/eduka-block.conf` | Wildcard rules, DoH blocks, Firefox canary |
 | `/etc/NetworkManager/dnsmasq.d/eduka-block-lists.conf` | Category lists (when dnsmasq is the resolver) |
+| `/etc/systemd/resolved.conf.d/eduka-block.conf` | Routes systemd-resolved through the filter (only while the filter answers) |
 | `/etc/firefox/policies/policies.json` | Firefox policy (merged; your other policies are kept and restored) |
 | `/etc/{chromium,opt/chrome,brave,opt/edge,...}/policies/managed/eduka-block.json` | Chromium-family policies |
 | nftables table `inet eduka_block` | IP/range blocks and anti-bypass rules |
@@ -170,7 +188,7 @@ English (International) is the default. Tetum, Português (Portugal), Português
 ## Development
 
 ```bash
-./build.sh                                      # dist/eduka-block_0.5.1-1_all.deb
+./build.sh                                      # dist/eduka-block_0.5.2-1_all.deb
 python3 -m unittest discover -s tests -v        # GTK smoke test runs when GTK + a display exist
 xvfb-run -a python3 -m unittest discover -s tests -v
 python3 src/eduka_block.py                      # interface from the source tree (the helper must be installed)
@@ -187,7 +205,7 @@ sudo apt purge eduka-block    # removes everything
 
 ## Project
 
-- Name: **Eduka-Block**, version **0.5.1** (package **0.5.1-1**)
+- Name: **Eduka-Block**, version **0.5.2** (package **0.5.2-1**)
 - Target: Edukasaun OS (Debian 13) with Eduka-Desktop/LXQt
 - Developer: **STI-MCAS & IDEA** · Project lead: **Hugo Moniz do Rego**
 - Website: <https://edukasaunos.tl> · Licence: GPL-3.0-or-later

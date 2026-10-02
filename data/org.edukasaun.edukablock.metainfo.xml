@@ -26,6 +26,9 @@
   <developer id="tl.edukasaunos"><name>STI-MCAS &amp; IDEA</name></developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.2" date="2026-10-02">
+      <description><p>Subdomain filtering now works on systems that use systemd-resolved, blocking a platform also blocks its related domains, a Turn off protection button, and a separate Squid Proxy page.</p></description>
+    </release>
     <release version="0.5.1" date="2026-10-01">
       <description><p>Official logo, account recovery for forgotten usernames and passwords (sign-in screen and eduka-block-reset), and safe installation inside image builders such as Cubic.</p></description>
     </release>

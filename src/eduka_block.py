@@ -108,6 +108,7 @@ NAV_PAGES = (
     ("dashboard", "nav_dashboard", "security-high-symbolic"),
     ("websites", "nav_websites", "web-browser-symbolic"),
     ("categories", "nav_categories", "view-grid-symbolic"),
+    ("squid", "nav_squid", "network-server-symbolic"),
     ("advanced", "nav_advanced", "preferences-system-symbolic"),
 )
 STATE_CLASSES = ("status-ok", "status-warning", "status-error")
@@ -293,6 +294,14 @@ def protection_layers(status: dict) -> list[tuple[str, bool]]:
         ("layer_browsers", bool(status.get("browser_policies"))),
         ("layer_dns", bool(status.get("dns_engine"))),
     ]
+
+
+def protection_active(status: dict) -> bool:
+    """True when any category list or strict mode is on (what Turn off removes)."""
+    lists = status.get("lists", {})
+    return any(settings.get("enabled") for settings in lists.values()) or bool(
+        status.get("strict_mode", {}).get("enabled")
+    )
 
 
 def recommended_active(status: dict) -> bool:
@@ -535,6 +544,7 @@ class MainWindow(Gtk.Window):
             ("dashboard", self.build_dashboard),
             ("websites", self.build_websites),
             ("categories", self.build_categories),
+            ("squid", self.build_squid),
             ("advanced", self.build_advanced),
         ):
             self.stack.add_named(self.page(builder()), name)
@@ -646,9 +656,17 @@ class MainWindow(Gtk.Window):
             T("turn_on_recommended"), self.on_recommended, "suggested-action", "hero-button",
             icon_name="security-high-symbolic",
         )
-        self.recommended_button.set_halign(Gtk.Align.START)
         self.recommended_button.set_tooltip_text(T("recommended_tooltip"))
-        texts.pack_start(self.recommended_button, False, False, 8)
+        self.turn_off_button = button(
+            T("turn_off_protection"), self.on_turn_off, "destructive-action", "hero-button",
+            icon_name="security-low-symbolic",
+        )
+        self.turn_off_button.set_tooltip_text(T("turn_off_tooltip"))
+        hero_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        hero_actions.set_halign(Gtk.Align.START)
+        hero_actions.pack_start(self.recommended_button, False, False, 0)
+        hero_actions.pack_start(self.turn_off_button, False, False, 0)
+        texts.pack_start(hero_actions, False, False, 8)
         self.hero.pack_start(hero_row, False, False, 0)
         page.pack_start(self.hero, False, False, 0)
 
@@ -746,6 +764,7 @@ class MainWindow(Gtk.Window):
         self.tree = Gtk.TreeView(model=self.sorted)
         self.tree.set_enable_search(False)
         self.tree.set_rubber_banding(True)
+        self.tree.set_tooltip_column(COL_COVERAGE)
         self.tree.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
         self.tree.get_selection().connect("changed", self.on_selection_changed)
         self.tree.connect("key-press-event", self.on_tree_key)
@@ -835,40 +854,43 @@ class MainWindow(Gtk.Window):
         parent.pack_start(row, False, False, 0)
         return switch, detail
 
-    def build_advanced(self) -> Gtk.Widget:
+    def build_squid(self) -> Gtk.Widget:
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        page.pack_start(self.page_header("advanced_title", "advanced_subtitle"), False, False, 0)
+        page.pack_start(self.page_header("squid_title", "squid_subtitle"), False, False, 0)
 
-        smart = card(0, "list-card")
-        self.smart_switch, self.smart_detail = self.toggle_row(
-            smart, "view-refresh-symbolic", "smart_tracking", "smart_tracking_tip", self.on_smart_default, None
-        )
-        sync_switch(self.smart_switch, True)
-        sync_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        add_classes(sync_row, "row-actions")
-        self.dns_status = label("", "pill")
-        sync_row.pack_start(self.dns_status, False, False, 0)
-        sync_row.pack_end(button(T("sync_now"), self.on_sync_now, icon_name="view-refresh-symbolic"), False, False, 0)
-        smart.pack_start(sync_row, False, False, 0)
-        page.pack_start(smart, False, False, 0)
-
-        squid = card(10)
-        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        status = card(0, "list-card")
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        add_classes(row, "toggle-row")
+        badge = Gtk.Box()
+        add_classes(badge, "row-icon")
+        badge.set_valign(Gtk.Align.CENTER)
+        badge.pack_start(icon("network-server-symbolic", 20), True, True, 0)
+        row.pack_start(badge, False, False, 0)
         texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        texts.pack_start(label(T("squid_title"), "card-title"), False, False, 0)
+        texts.set_valign(Gtk.Align.CENTER)
+        texts.pack_start(label(T("squid_switch_title"), "row-title"), False, False, 0)
+        texts.pack_start(label(T("squid_description"), "row-text", wrap=True), False, False, 0)
         self.squid_status = label("", "pill")
         self.squid_status.set_halign(Gtk.Align.START)
-        texts.pack_start(self.squid_status, False, False, 0)
-        head.pack_start(texts, True, True, 0)
+        texts.pack_start(self.squid_status, False, False, 2)
+        row.pack_start(texts, True, True, 0)
         self.squid_switch = Gtk.Switch()
         self.squid_switch.set_valign(Gtk.Align.CENTER)
         self.squid_switch.connect("state-set", self.on_squid_toggle)
-        head.pack_end(self.squid_switch, False, False, 0)
-        squid.pack_start(head, False, False, 0)
-        squid.pack_start(label(T("squid_description"), "card-text", wrap=True), False, False, 0)
+        row.pack_end(self.squid_switch, False, False, 0)
+        status.pack_start(row, False, False, 0)
+        page.pack_start(status, False, False, 0)
+
+        howto = card(8)
+        howto.pack_start(label(T("squid_howto_title"), "card-title"), False, False, 0)
+        howto.pack_start(label(T("squid_howto_text"), "card-text", wrap=True), False, False, 0)
         commands = label(T("squid_commands"), "code-box")
         commands.set_selectable(True)
-        squid.pack_start(commands, False, False, 0)
+        howto.pack_start(commands, False, False, 0)
+        page.pack_start(howto, False, False, 0)
+
+        squid = card(10)
+        squid.pack_start(label(T("squid_keywords_title"), "card-title"), False, False, 0)
         add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.squid_keyword_entry = Gtk.Entry()
         self.squid_keyword_entry.set_placeholder_text(T("squid_keyword_hint"))
@@ -891,7 +913,26 @@ class MainWindow(Gtk.Window):
             False, False, 0,
         )
         squid.pack_start(remove_row, False, False, 0)
+
         page.pack_start(squid, False, False, 0)
+        return page
+
+    def build_advanced(self) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        page.pack_start(self.page_header("advanced_title", "advanced_subtitle"), False, False, 0)
+
+        smart = card(0, "list-card")
+        self.smart_switch, self.smart_detail = self.toggle_row(
+            smart, "view-refresh-symbolic", "smart_tracking", "smart_tracking_tip", self.on_smart_default, None
+        )
+        sync_switch(self.smart_switch, True)
+        sync_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        add_classes(sync_row, "row-actions")
+        self.dns_status = label("", "pill")
+        sync_row.pack_start(self.dns_status, False, False, 0)
+        sync_row.pack_end(button(T("sync_now"), self.on_sync_now, icon_name="view-refresh-symbolic"), False, False, 0)
+        smart.pack_start(sync_row, False, False, 0)
+        page.pack_start(smart, False, False, 0)
 
         account = card(10)
         account_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -937,6 +978,8 @@ class MainWindow(Gtk.Window):
                 if kind == "domain"
                 else T("coverage_firewall")
             )
+            if entry.get("related_count"):
+                coverage += " · " + T("coverage_related", count=entry["related_count"])
             self.model.append(
                 [
                     str(entry.get("id", "")),
@@ -968,6 +1011,7 @@ class MainWindow(Gtk.Window):
         self.hero_title.set_text(T(title))
         self.hero_subtitle.set_text(T("hero_layers", active=active, total=len(layers)))
         self.recommended_button.set_visible(not recommended_active(status))
+        self.turn_off_button.set_visible(protection_active(status))
         for key, on in layers:
             image, row = self.layer_widgets[key]
             image.set_from_icon_name("emblem-ok-symbolic" if on else "window-close-symbolic", Gtk.IconSize.BUTTON)
@@ -1152,6 +1196,11 @@ class MainWindow(Gtk.Window):
     def on_recommended(self, *_args) -> None:
         if confirm(self, T("recommended_confirm_title"), T("recommended_confirm_body"), "turn_on"):
             self.configure({"lists": {key: True for key in RECOMMENDED_LISTS}, "strict": True})
+
+    def on_turn_off(self, *_args) -> None:
+        if confirm(self, T("turn_off_confirm_title"), T("turn_off_confirm_body"), "turn_off"):
+            lists = self.status.get("lists", {})
+            self.configure({"lists": {key: False for key in lists}, "strict": False})
 
     def on_list_toggle(self, switch: Gtk.Switch, requested: bool, key: str) -> bool:
         if self.refreshing:

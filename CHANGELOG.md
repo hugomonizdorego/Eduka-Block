@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.2 — 2026-10-02
+
+### Fixed
+
+- Blocked sites (for example TikTok) could still be opened on systems where `/etc/resolv.conf` points to systemd-resolved (`127.0.0.53`). The filtering dnsmasq was never consulted there, so only `/etc/hosts` applied, and it covers just the domain and its `www` name. Eduka-Block now routes systemd-resolved through dnsmasq with `/etc/systemd/resolved.conf.d/eduka-block.conf`.
+  - The route is only installed after dnsmasq answers a health-check record (`eduka-block-check.invalid`).
+  - It is removed as soon as dnsmasq stops answering, and also on package removal, so name resolution never breaks.
+- DNS caches are flushed after each change (`resolvectl flush-caches`), so new rules apply immediately.
+- The status request no longer probes DNS; it reports the mode stored by the last apply or sync.
+
+### Added
+
+- Platform families: a rule for TikTok, Facebook, Instagram, YouTube, X/Twitter, Snapchat, Discord, Roblox, Reddit, WhatsApp, Telegram, Twitch, Pinterest or Threads blocks all of that platform's own domains (video CDNs, short links, APIs). The rules table shows "+N related domains".
+- **Turn off protection** button on the dashboard next to *Turn on recommended protection*. It disables every category list and strict mode; manual website rules stay blocked.
+- Squid Proxy has its own page in the sidebar, with status, setup instructions and blocked words.
+- Full coverage text as a tooltip in the rules table.
+
 ## 0.5.1 — 2026-10-01
 
 ### Added

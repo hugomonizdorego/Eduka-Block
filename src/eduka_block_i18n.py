@@ -242,7 +242,7 @@ EN = {
     "lists_source": "Lists: StevenBlack/hosts (MIT licence). Third-party lists can contain mistakes; add your own rules on the Websites page.",
     "update_lists": "Update now",
     "advanced_title": "Advanced",
-    "advanced_subtitle": "Smart IP tracking, the Squid keyword proxy and the administrator account.",
+    "advanced_subtitle": "Smart IP tracking, the DNS filter status and the administrator account.",
     "account_title": "Administrator account",
     "account_text": "Only parents and teachers with this account can open Eduka-Block.",
     "protection_updated": "Protection updated",
@@ -267,6 +267,17 @@ EN = {
     "account_reset_title": "Account recovered",
     "account_reset_body": "Sign in as “{username}” with the new password.",
     "login_forgot_hint": "Forgot them? Use “Forgot username or password?” below the password field.",
+    "nav_squid": "Squid Proxy",
+    "squid_subtitle": "An extra filter that blocks words in web addresses, for browsers set to use the local proxy.",
+    "squid_switch_title": "Keyword filtering",
+    "squid_howto_title": "How to use it",
+    "squid_howto_text": "Squid only filters browsers that use the proxy. In the browser's network settings choose a manual proxy and enter the address below for HTTP and HTTPS. The other Eduka-Block layers protect every browser without this step.",
+    "squid_keywords_title": "Blocked words",
+    "turn_off_protection": "Turn off protection",
+    "turn_off_tooltip": "Turns off every category list and SafeSearch & anti-bypass. Your own website rules stay blocked.",
+    "turn_off_confirm_title": "Turn off protection?",
+    "turn_off_confirm_body": "Adult content, gambling, social media and malware lists, SafeSearch and anti-bypass will all be turned off. Websites you blocked yourself stay blocked. You can turn protection on again at any time.",
+    "coverage_related": "+{count} related domains",
 }
 
 TET = {
@@ -487,7 +498,7 @@ TET = {
     "lists_source": "Lista: StevenBlack/hosts (lisensa MIT). Lista parte terseira bele iha sala; hatama ita-nia regra rasik iha pájina Website sira.",
     "update_lists": "Atualiza agora",
     "advanced_title": "Avansadu",
-    "advanced_subtitle": "Monitorizasaun IP intelijente, proxy liafuan Squid no konta administradór.",
+    "advanced_subtitle": "Monitorizasaun IP intelijente, estadu filtru DNS no konta administradór.",
     "account_title": "Konta administradór",
     "account_text": "Inan-aman no profesór ho konta ne'e de'it mak bele loke Eduka-Block.",
     "protection_updated": "Protesaun atualizadu",
@@ -512,6 +523,17 @@ TET = {
     "account_reset_title": "Konta rekupera ona",
     "account_reset_body": "Tama hanesan “{username}” ho liafuan-xave foun.",
     "login_forgot_hint": "Haluha? Uza “Haluha naran-utilizadór ka liafuan-xave?” iha liafuan-xave nia okos.",
+    "nav_squid": "Proxy Squid",
+    "squid_subtitle": "Filtru estra ne'ebé blokeia liafuan iha enderesu web, ba browser ne'ebé uza proxy lokál.",
+    "squid_switch_title": "Filtru liafuan",
+    "squid_howto_title": "Oinsá atu uza",
+    "squid_howto_text": "Squid filtra de'it browser ne'ebé uza proxy. Iha konfigurasaun rede browser nian, hili proxy manuál no hatama enderesu iha okos ba HTTP no HTTPS. Kamada Eduka-Block seluk proteje browser hotu la presiza pasu ida-ne'e.",
+    "squid_keywords_title": "Liafuan ne'ebé blokeadu",
+    "turn_off_protection": "Dezativa protesaun",
+    "turn_off_tooltip": "Dezativa lista kategoria hotu no SafeSearch & anti-bypass. Ita-nia regra website rasik sei blokeadu nafatin.",
+    "turn_off_confirm_title": "Dezativa protesaun?",
+    "turn_off_confirm_body": "Lista konteúdu adultu, jogu-osan, mídia sosiál no malware, SafeSearch no anti-bypass sei dezativa hotu. Website ne'ebé ita blokeia rasik sei blokeadu nafatin. Ita bele ativa fali protesaun iha tempu hotu.",
+    "coverage_related": "+{count} domíniu relasionadu",
 }
 
 PT_PT = {
@@ -732,7 +754,7 @@ PT_PT = {
     "lists_source": "Listas: StevenBlack/hosts (licença MIT). Listas externas podem ter erros; adicione as suas regras na página Sites.",
     "update_lists": "Atualizar agora",
     "advanced_title": "Avançado",
-    "advanced_subtitle": "Seguimento inteligente de IP, proxy de palavras Squid e conta de administrador.",
+    "advanced_subtitle": "Seguimento inteligente de IP, estado do filtro DNS e conta de administrador.",
     "account_title": "Conta de administrador",
     "account_text": "Só pais e professores com esta conta podem abrir o Eduka-Block.",
     "protection_updated": "Proteção atualizada",
@@ -757,6 +779,17 @@ PT_PT = {
     "account_reset_title": "Conta recuperada",
     "account_reset_body": "Entre como “{username}” com a nova palavra-passe.",
     "login_forgot_hint": "Esqueceu-se? Use “Esqueceu o nome de utilizador ou a palavra-passe?” por baixo da palavra-passe.",
+    "nav_squid": "Proxy Squid",
+    "squid_subtitle": "Um filtro adicional que bloqueia palavras nos endereços web, para navegadores configurados com o proxy local.",
+    "squid_switch_title": "Filtragem por palavras",
+    "squid_howto_title": "Como usar",
+    "squid_howto_text": "O Squid só filtra navegadores que usam o proxy. Nas definições de rede do navegador escolha um proxy manual e introduza o endereço abaixo para HTTP e HTTPS. As outras camadas do Eduka-Block protegem todos os navegadores sem este passo.",
+    "squid_keywords_title": "Palavras bloqueadas",
+    "turn_off_protection": "Desativar a proteção",
+    "turn_off_tooltip": "Desativa todas as listas de categorias e o SafeSearch e anti-contorno. As suas regras de sites continuam bloqueadas.",
+    "turn_off_confirm_title": "Desativar a proteção?",
+    "turn_off_confirm_body": "As listas de conteúdo adulto, jogo, redes sociais e malware, o SafeSearch e o anti-contorno serão todos desativados. Os sites que bloqueou continuam bloqueados. Pode voltar a ativar a proteção a qualquer momento.",
+    "coverage_related": "+{count} domínios relacionados",
 }
 
 PT_BR = {
@@ -829,7 +862,7 @@ PT_BR = {
     "strict_off": "Desativado • os navegadores podem contornar o filtro com DNS criptografado",
     "strict_disable_body": "Os navegadores poderão usar DNS criptografado e ignorar todas as regras DNS do Eduka-Block, e os resultados de pesquisa não serão mais filtrados.",
     "lists_source": "Listas: StevenBlack/hosts (licença MIT). Listas externas podem ter erros; adicione suas regras na página Sites.",
-    "advanced_subtitle": "Rastreamento inteligente de IP, proxy de palavras Squid e conta de administrador.",
+    "advanced_subtitle": "Rastreamento inteligente de IP, status do filtro DNS e conta de administrador.",
     "account_text": "Somente pais e professores com esta conta podem abrir o Eduka-Block.",
     "err_list_download": "Não foi possível baixar a lista de bloqueio. Verifique a conexão com a internet.",
     "err_list_integrity": "A lista de bloqueio baixada falhou na validação de integridade.",
@@ -842,6 +875,10 @@ PT_BR = {
     "reset_note": "Administrador verificado. Mantenha ou altere o nome de usuário e escolha uma nova senha.",
     "account_reset_body": "Entre como “{username}” com a nova senha.",
     "login_forgot_hint": "Esqueceu? Use “Esqueceu o nome de usuário ou a senha?” abaixo da senha.",
+    "squid_subtitle": "Um filtro adicional que bloqueia palavras nos endereços web, para navegadores configurados com o proxy local.",
+    "squid_howto_text": "O Squid só filtra navegadores que usam o proxy. Nas configurações de rede do navegador escolha um proxy manual e digite o endereço abaixo para HTTP e HTTPS. As outras camadas do Eduka-Block protegem todos os navegadores sem esta etapa.",
+    "turn_off_tooltip": "Desativa todas as listas de categorias e o SafeSearch e anti-contorno. Suas regras de sites continuam bloqueadas.",
+    "turn_off_confirm_body": "As listas de conteúdo adulto, jogos de azar, redes sociais e malware, o SafeSearch e o anti-contorno serão todos desativados. Os sites que você bloqueou continuam bloqueados. Você pode ativar a proteção novamente a qualquer momento.",
 }
 
 ID = {
@@ -1062,7 +1099,7 @@ ID = {
     "lists_source": "Daftar: StevenBlack/hosts (lisensi MIT). Daftar pihak ketiga bisa keliru; tambahkan aturan sendiri di halaman Website.",
     "update_lists": "Perbarui sekarang",
     "advanced_title": "Lanjutan",
-    "advanced_subtitle": "Pelacakan IP cerdas, proxy kata Squid, dan akun administrator.",
+    "advanced_subtitle": "Pelacakan IP cerdas, status filter DNS, dan akun administrator.",
     "account_title": "Akun administrator",
     "account_text": "Hanya orang tua dan guru yang memiliki akun ini yang dapat membuka Eduka-Block.",
     "protection_updated": "Perlindungan diperbarui",
@@ -1087,6 +1124,17 @@ ID = {
     "account_reset_title": "Akun berhasil dipulihkan",
     "account_reset_body": "Masuk sebagai “{username}” dengan password baru.",
     "login_forgot_hint": "Lupa? Gunakan “Lupa username atau password?” di bawah kolom password.",
+    "nav_squid": "Squid Proxy",
+    "squid_subtitle": "Filter tambahan yang memblokir kata di alamat web, untuk browser yang memakai proxy lokal.",
+    "squid_switch_title": "Penyaringan kata",
+    "squid_howto_title": "Cara memakai",
+    "squid_howto_text": "Squid hanya menyaring browser yang memakai proxy. Di pengaturan jaringan browser pilih proxy manual dan masukkan alamat di bawah untuk HTTP dan HTTPS. Lapisan Eduka-Block lainnya melindungi semua browser tanpa langkah ini.",
+    "squid_keywords_title": "Kata yang diblokir",
+    "turn_off_protection": "Matikan perlindungan",
+    "turn_off_tooltip": "Mematikan semua daftar kategori serta SafeSearch & anti-bypass. Aturan website buatan Anda tetap diblokir.",
+    "turn_off_confirm_title": "Matikan perlindungan?",
+    "turn_off_confirm_body": "Daftar konten dewasa, perjudian, media sosial, dan malware, SafeSearch, serta anti-bypass akan dimatikan. Website yang Anda blokir sendiri tetap diblokir. Perlindungan dapat dinyalakan kembali kapan saja.",
+    "coverage_related": "+{count} domain terkait",
 }
 
 TRANSLATIONS = {"en": EN, "tet": TET, "pt_PT": PT_PT, "pt_BR": PT_BR, "id": ID}

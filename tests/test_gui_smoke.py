@@ -62,6 +62,29 @@ class MainWindowSmokeTests(unittest.TestCase):
         self.assertTrue(window.list_switches["adult"].get_state())
         self.assertFalse(window.list_switches["social"].get_state())
 
+    def test_turn_on_and_turn_off_buttons_follow_the_state(self):
+        window = self.ui.MainWindow(fake_status(protected=False))
+        self.addCleanup(window.destroy)
+        self.assertTrue(window.recommended_button.get_visible())
+        self.assertFalse(window.turn_off_button.get_visible())
+        window.load_status(fake_status(protected=True))
+        self.assertFalse(window.recommended_button.get_visible())
+        self.assertTrue(window.turn_off_button.get_visible())
+        sent = []
+        window.configure = sent.append
+        self.ui.confirm = lambda *args, **kwargs: True
+        window.on_turn_off()
+        self.assertEqual(sent[0]["strict"], False)
+        self.assertFalse(any(sent[0]["lists"].values()))
+
+    def test_squid_has_its_own_page(self):
+        window = self.ui.MainWindow(fake_status(protected=True))
+        self.addCleanup(window.destroy)
+        window.select_page("squid")
+        self.pump()
+        self.assertEqual(window.stack.get_visible_child_name(), "squid")
+        self.assertEqual(len(window.squid_flow.get_children()), 2)
+
     def test_exactly_one_navigation_item_is_selected(self):
         window = self.ui.MainWindow(fake_status(protected=True))
         self.addCleanup(window.destroy)

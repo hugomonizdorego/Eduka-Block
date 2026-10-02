@@ -25,6 +25,16 @@ if [ "$1" = "purge" ]; then
     done
 fi
 
+# Never leave systemd-resolved pointing at a filter that is no longer there.
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if [ -e /etc/systemd/resolved.conf.d/eduka-block.conf ]; then
+        rm -f /etc/systemd/resolved.conf.d/eduka-block.conf
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl try-restart systemd-resolved.service >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
 fi

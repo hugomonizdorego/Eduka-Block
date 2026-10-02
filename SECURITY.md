@@ -1,4 +1,4 @@
-# Security model — Eduka-Block 0.5.1
+# Security model — Eduka-Block 0.5.2
 
 Eduka-Block separates its unprivileged GTK interface from a small root helper.
 
@@ -58,6 +58,11 @@ Smart IP protection deliberately does not infer whole provider/CDN subnets. Shar
 addresses can host unrelated services, so expanding one domain to an entire subnet
 would create unsafe collateral blocking. Administrators can add a reviewed CIDR rule
 explicitly.
+
+## systemd-resolved bridge
+
+- When `/etc/resolv.conf` points to systemd-resolved, Eduka-Block writes `/etc/systemd/resolved.conf.d/eduka-block.conf` (`DNS=127.0.0.1`, `Domains=~.`), so lookups pass through NetworkManager's filtering dnsmasq.
+- The file is written only after dnsmasq answers a private health-check name with the expected address. It is removed when that check fails, during cleanup and in `postrm`. A stopped filter therefore fails open (normal DNS) instead of cutting the internet.
 
 ## Strict mode (SafeSearch and anti-bypass)
 

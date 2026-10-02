@@ -73,6 +73,8 @@ class SandboxTestCase(unittest.TestCase):
         self.chromium_dirs = (self.root / "chromium", self.root / "chrome")
         self.firefox = self.root / "firefox" / "policies.json"
         self.firewall_rulesets = []
+        self.dnsmasq_healthy = False
+        self.resolved_restarts = []
         paths = {
             "STATE_DIR": self.root / "state",
             "STATE_PATH": self.root / "state" / "blocklist.json",
@@ -88,6 +90,7 @@ class SandboxTestCase(unittest.TestCase):
             "LOCK_PATH": self.root / "eduka-block.lock",
             "APP_SHARE_DIR": self.root / "share",
             "CREDENTIALS_PATH": self.root / "share" / "credentials.txt",
+            "RESOLVED_DROPIN_PATH": self.root / "resolved.conf.d" / "eduka-block.conf",
         }
         stubs = {
             "require_root": lambda: None,
@@ -97,6 +100,9 @@ class SandboxTestCase(unittest.TestCase):
                 helper.build_ruleset(state, False)
             ),
             "download_blocklist": self._no_download,
+            "dnsmasq_answers": lambda: self.dnsmasq_healthy,
+            "restart_resolved": lambda: self.resolved_restarts.append(True),
+            "flush_dns_caches": lambda: None,
         }
         for name, value in {**paths, **stubs}.items():
             patcher = patch.object(helper, name, value)
@@ -362,7 +368,7 @@ class InterfaceDesignTests(SandboxTestCase):
         css = (SOURCE.parent / "assets" / "eduka-block.css").read_text(encoding="utf-8")
         interface = (SOURCE / "eduka_block.py").read_text(encoding="utf-8")
 
-        self.assertEqual(APP_VERSION, "0.5.1")
+        self.assertEqual(APP_VERSION, "0.5.2")
         for selector in (".sidebar", ".nav-button", ".hero", ".card", ".toggle-row", ".toast", ".pill", ".chip"):
             with self.subTest(selector=selector):
                 self.assertIn(selector, css)
@@ -374,7 +380,7 @@ class InterfaceDesignTests(SandboxTestCase):
                     self.assertTrue(stripped.startswith((".eduka-window", ".auth-dialog")))
         self.assertIn("self.set_default_size(980, 660)", interface)
         self.assertIn("self.set_size_request(760, 540)", interface)
-        for page in ("dashboard", "websites", "categories", "advanced"):
+        for page in ("dashboard", "websites", "categories", "squid", "advanced"):
             self.assertIn(f'("{page}", self.build_{page})', interface)
         self.assertIn('"protection-configure"', interface)
         self.assertIn("RECOMMENDED_LISTS", interface)
@@ -750,6 +756,85 @@ class ProtectionLayerTests(SandboxTestCase):
         self.assertEqual(helper.detect_dns_mode(), "hosts")
         self.resolv.write_text("nameserver 127.0.0.1\n", encoding="utf-8")
         self.assertEqual(helper.detect_dns_mode(), "dnsmasq")
+
+
+class ResolvedBridgeTests(SandboxTestCase):
+    """Systems using systemd-resolved (127.0.0.53) never asked the filter."""
+
+    def use_resolved(self):
+        self.nm_config.write_text("[main]\ndns=dnsmasq\n", encoding="utf-8")
+        self.resolv.write_text("nameserver 127.0.0.53\noptions edns0\n", encoding="utf-8")
+
+    def test_bridge_is_installed_only_when_dnsmasq_answers(self):
+        self.use_resolved()
+        state = default_state()
+        self.assertEqual(helper.apply_system(state), "hosts")
+        self.assertFalse(helper.RESOLVED_DROPIN_PATH.exists())
+        self.dnsmasq_healthy = True
+        self.assertEqual(helper.apply_system(state), "dnsmasq")
+        dropin = helper.RESOLVED_DROPIN_PATH.read_text(encoding="utf-8")
+        self.assertIn("DNS=127.0.0.1", dropin)
+        self.assertIn("Domains=~.", dropin)
+        self.assertEqual(len(self.resolved_restarts), 1)
+        helper.apply_system(state)  # unchanged: no needless restart
+        self.assertEqual(len(self.resolved_restarts), 1)
+
+    def test_bridge_is_removed_when_dnsmasq_stops_so_dns_keeps_working(self):
+        self.use_resolved()
+        self.dnsmasq_healthy = True
+        helper.apply_system(default_state())
+        self.dnsmasq_healthy = False
+        self.assertEqual(helper.apply_system(default_state()), "hosts")
+        self.assertFalse(helper.RESOLVED_DROPIN_PATH.exists())
+        self.assertEqual(len(self.resolved_restarts), 2)
+
+    def test_cleanup_removes_bridge_first(self):
+        self.use_resolved()
+        self.dnsmasq_healthy = True
+        helper.apply_system(default_state())
+        with patch.object(helper, "clear_firewall"), patch.object(helper, "remove_squid_files"), \
+                patch.object(helper, "squid_binary", return_value=None):
+            helper.cleanup_system()
+        self.assertFalse(helper.RESOLVED_DROPIN_PATH.exists())
+
+    def test_health_check_record_is_always_served(self):
+        helper.render_dnsmasq(default_state() | {"strict_mode": {"enabled": False}})
+        self.assertIn(
+            f"address=/{helper.HEALTH_CHECK_NAME}/{helper.HEALTH_CHECK_ADDRESS}",
+            helper.DNSMASQ_RULES_PATH.read_text(encoding="utf-8"),
+        )
+
+
+class PlatformFamilyTests(SandboxTestCase):
+    def test_blocking_tiktok_blocks_its_video_and_api_domains(self):
+        state = default_state()
+        state["strict_mode"]["enabled"] = False
+        state["entries"] = [{"id": "t", "value": "tiktok.com", "kind": "domain", "smart": False}]
+        helper.apply_system(state)
+        dnsmasq = helper.DNSMASQ_RULES_PATH.read_text(encoding="utf-8")
+        hosts = self.hosts.read_text(encoding="utf-8")
+        for domain in ("tiktok.com", "tiktokv.com", "tiktokcdn.com", "ttwstatic.com", "byteoversea.com"):
+            with self.subTest(domain=domain):
+                self.assertIn(f"address=/{domain}/0.0.0.0", dnsmasq)
+                self.assertIn(f"0.0.0.0 {domain}", hosts)
+
+    def test_any_member_or_subdomain_selects_the_family(self):
+        self.assertIn("twimg.com", helper.related_domains("twitter.com"))
+        self.assertIn("ytimg.com", helper.related_domains("m.youtube.com"))
+        self.assertEqual(helper.related_domains("example.org"), set())
+        self.assertEqual(helper.related_domains("nottiktok.com"), set())
+
+    def test_status_reports_related_count(self):
+        state = default_state()
+        state["entries"] = [
+            {"id": "t", "value": "tiktok.com", "kind": "domain"},
+            {"id": "i", "value": "203.0.113.9", "kind": "ipv4"},
+        ]
+        save_state(state)
+        entries = helper.public_status()["entries"]
+        self.assertGreater(entries[0]["related_count"], 10)
+        self.assertNotIn("related_count", entries[1])
+        self.assertNotIn("related_count", load_state()["entries"][0])  # not persisted
 
 
 class AccountRecoveryTests(SandboxTestCase):

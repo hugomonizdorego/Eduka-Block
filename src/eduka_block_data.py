@@ -114,3 +114,28 @@ FIREFOX_POLICY_PATH = Path("/etc/firefox/policies/policies.json")
 FIREFOX_POLICIES = {
     "DNSOverHTTPS": {"Enabled": False, "Locked": True},
 }
+
+# Platforms that serve one service from several domains. A rule for any member
+# blocks the whole family (with all subdomains); otherwise blocking
+# "tiktok.com" still lets videos load from "tiktokv.com"/"tiktokcdn.com".
+# Only domains owned by the platform are listed: shared infrastructure such
+# as googleapis.com, akamaized.net or cloudfront.net would break other sites.
+PLATFORM_FAMILIES: tuple[tuple[str, ...], ...] = (
+    ("tiktok.com", "tiktokv.com", "tiktokv.us", "tiktokw.us", "tiktokcdn.com", "tiktokcdn-us.com",
+     "tiktokcdn-eu.com", "tiktok.org", "tiktokd.org", "ttwstatic.com", "musical.ly", "muscdn.com",
+     "byteoversea.com", "ibytedtos.com", "ibyteimg.com", "tik-tokapi.com", "tiktokrow-cdn.com"),
+    ("facebook.com", "fb.com", "fb.me", "fb.watch", "fbcdn.net", "facebook.net", "fbsbx.com",
+     "messenger.com", "m.me"),
+    ("instagram.com", "cdninstagram.com", "ig.me", "instagr.am"),
+    ("youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "youtubekids.com"),
+    ("x.com", "twitter.com", "twimg.com", "t.co"),
+    ("snapchat.com", "snap.com", "snapkit.com", "sc-cdn.net", "sc-static.net", "snapads.com"),
+    ("discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media", "discordcdn.com"),
+    ("roblox.com", "rbxcdn.com", "roblox.qq.com", "robloxlabs.com"),
+    ("reddit.com", "redd.it", "redditmedia.com", "redditstatic.com"),
+    ("whatsapp.com", "whatsapp.net", "wa.me"),
+    ("telegram.org", "telegram.me", "t.me", "telegra.ph", "tdesktop.com"),
+    ("twitch.tv", "ttvnw.net", "jtvnw.net", "twitchcdn.net"),
+    ("pinterest.com", "pinimg.com", "pin.it"),
+    ("threads.net", "threads.com"),
+)
