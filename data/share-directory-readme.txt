@@ -1,5 +1,5 @@
-EDUKA-BLOCK 0.4.1 ACCOUNT DIRECTORY
-================================
+EDUKA-BLOCK ACCOUNT DIRECTORY
+=============================
 
 After first setup, credentials.txt is created in this directory.
 It is a normal UTF-8 text file and can be opened with Xed, Pluma, Gedit,

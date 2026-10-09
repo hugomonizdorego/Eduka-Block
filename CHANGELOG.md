@@ -1,5 +1,102 @@
 # Changelog
 
+## 0.5.2 — 2026-10-02
+
+### Fixed
+
+- Blocked sites (for example TikTok) could still be opened on systems where `/etc/resolv.conf` points to systemd-resolved (`127.0.0.53`). The filtering dnsmasq was never consulted there, so only `/etc/hosts` applied, and it covers just the domain and its `www` name. Eduka-Block now routes systemd-resolved through dnsmasq with `/etc/systemd/resolved.conf.d/eduka-block.conf`.
+  - The route is only installed after dnsmasq answers a health-check record (`eduka-block-check.invalid`).
+  - It is removed as soon as dnsmasq stops answering, and also on package removal, so name resolution never breaks.
+- DNS caches are flushed after each change (`resolvectl flush-caches`), so new rules apply immediately.
+- The status request no longer probes DNS; it reports the mode stored by the last apply or sync.
+
+### Added
+
+- Platform families: a rule for TikTok, Facebook, Instagram, YouTube, X/Twitter, Snapchat, Discord, Roblox, Reddit, WhatsApp, Telegram, Twitch, Pinterest or Threads blocks all of that platform's own domains (video CDNs, short links, APIs). The rules table shows "+N related domains".
+- **Turn off protection** button on the dashboard next to *Turn on recommended protection*. It disables every category list and strict mode; manual website rules stay blocked.
+- Squid Proxy has its own page in the sidebar, with status, setup instructions and blocked words.
+- Full coverage text as a tooltip in the rules table.
+
+## 0.5.1 — 2026-10-01
+
+### Added
+
+- Official Eduka-Block logo: a shield holding an open book, crossed by a check mark. It ships as the app icon (white rounded tile, `hicolor/scalable/apps/eduka-block.svg`) and as a bare mark for the sign-in screen (`/usr/share/eduka-block/eduka-block-logo.svg`). The interface accent colours now follow the logo's blue and green.
+- Account recovery: **Forgot username or password?** on the sign-in screen. The administrator password (PolicyKit) reveals the stored username through the new helper action `account-info`, then a new password is saved. Protection rules are not touched.
+- `eduka-block-reset` terminal tool (`/usr/sbin`, root only): show the username, set a new password, or remove the account.
+- A failed sign-in now points to the recovery option.
+
+### Fixed
+
+- Installing the package inside an image builder (Cubic, live-build, debootstrap chroot) no longer tries to restart services or reload NetworkManager. A chroot can share the host's `/run` and D-Bus, so those commands could act on the host. Units are still enabled, and protection starts at the image's first boot. Detection uses `ischroot` from debianutils.
+
+## 0.5.0 — 2026-10-01
+
+### Interface
+
+- Completely redesigned: dark sidebar navigation with Dashboard, Websites, Categories and Advanced pages, rounded cards, status pills and short notifications.
+- Dashboard shows the protection level (6 layers), totals and a quick "Block a website" box.
+- **Turn on recommended protection** enables the adult, gambling and malware lists plus strict mode in one step.
+- Categories page: one switch per list with domain count and update date.
+- Squid keywords are shown as chips; the account, About and Smart IP settings moved to Advanced.
+- New sign-in and account dialogs.
+
+### Blocking
+
+- Category lists: Adult content, Gambling, Social media, and Malware/scams/ads (StevenBlack/hosts), refreshed automatically every 7 days by the sync timer.
+- Strict mode (on by default) adds:
+  - SafeSearch for Google (51 country domains), Bing and DuckDuckGo, and YouTube Restricted Mode.
+  - Blocking of DNS-over-HTTPS resolvers by name (DNS) and by address (firewall, ports 443/853), and of all DNS-over-TLS.
+  - Firefox's DoH canary domain answered with NXDOMAIN.
+  - Firefox and Chromium/Chrome/Brave/Edge enterprise policies.
+- A blocked site always wins over its SafeSearch address.
+- When NetworkManager's dnsmasq is the resolver, category lists are served by dnsmasq (wildcard, NXDOMAIN) instead of `/etc/hosts`, so name lookups stay fast. The sync timer moves them automatically when the resolver changes.
+- Rules entered as `www.example.com` (or a `https://www...` URL) are stored as `example.com`, so every subdomain is blocked.
+- Firefox policies are merged into an existing `policies.json` and restored exactly when strict mode is turned off. A broken third-party policy file no longer prevents other layers from applying.
+
+### Installation
+
+- New single-file offline installer (`eduka-block-<version>-offline-<codename>-<arch>.run`) containing every dependency as a local APT repository. It installs without internet and falls back to the internet only when needed.
+- `tools/build-offline-bundle.sh` builds it. CI builds it for Debian 13, tests it on a clean minimal system, and attaches it to GitHub releases for `v*` tags.
+
+### Internal
+
+- State schema 4 (category lists, strict mode, DNS mode); older states migrate automatically.
+- New helper action `protection-configure`; the 0.4 `adult-*` actions still work.
+- Translations regenerated: obsolete strings removed, all new strings translated into Tetum, Portuguese (Portugal/Brazil) and Indonesian.
+- The test suite now runs every helper operation inside a temporary root, and includes a headless GTK smoke test.
+
+## 0.4.2 — 2026-09-30
+
+### Fixed
+
+- Firewall updates no longer fail when an IP address lies inside a blocked CIDR range, or when two rules overlap. nftables interval sets reject overlapping elements, which previously rolled back the whole change; overlapping and adjacent addresses are now merged before the ruleset is generated.
+- The main menu popover no longer opens by itself when the window appears.
+- The empty-list hint no longer stays visible after rules are loaded.
+- Debian 13 installs: depend on `pkexec` and `polkitd` (with `policykit-1` as an alternative for older releases); the `policykit-1` transitional package no longer exists in Debian 13.
+- The helper lock moved from world-writable `/run/lock` to root-only `/run`, so an unprivileged user can no longer pre-create or hold it to stall protection updates. Waiting for the lock now times out after 90 seconds with a clear message instead of hanging.
+- Smart IP synchronisation and adult-list downloads run their slow network work before taking the lock, so the interface is no longer blocked for minutes while the timer runs.
+- Adding and removing rules no longer freezes the window; every privileged action now runs in the background, and locking, closing or switching language is held back until it finishes.
+- Many error messages that appeared in English are now translated into Tetum, Portuguese (Portugal/Brazil) and Indonesian.
+- Styling is scoped to Eduka-Block windows so menus, file choosers and message dialogs keep the native theme.
+
+### Added
+
+- Import rules from a plain list, a previous export, or a hosts-format blocklist (up to 1,000 entries in one authorisation); export all rules to a text file.
+- Select and remove several rules at once.
+- "Sync IP addresses now" button and last-synchronisation time in the overview.
+- Sortable rule columns, a rule counter with search results, and Ctrl+F / Ctrl+L shortcuts.
+- A subdomain already covered by a blocked parent domain is reported instead of being added twice.
+- Status colours: DNS fallback and stopped Squid are shown as warnings, failed operations as errors.
+- Show/hide password buttons, a dedicated "change account" dialog, and remaining sign-in attempts.
+- Duplicate Squid keywords are reported before calling the helper; Delete removes the selected keyword.
+
+### Changed
+
+- The version number is defined once in `src/eduka_block_common.py`; `build.sh`, generated files and translations read it from there, and `Installed-Size` is calculated during the build.
+- NetworkManager is reloaded before the firewall service during installation so the first apply already uses the DNS plugin.
+- systemd services run with `NoNewPrivileges`, `PrivateTmp` and `ProtectHome`.
+
 ## 0.4.1 — 2026-09-05
 
 - Refreshed the complete GTK interface with subtle soft-3D depth, small shadows, layered borders, and theme-adaptive colours.

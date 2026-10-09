@@ -13,10 +13,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.5.2"
 APP_SHARE_DIR = Path("/usr/share/Eduka-Block")
 CREDENTIALS_PATH = APP_SHARE_DIR / "credentials.txt"
 PBKDF2_ITERATIONS = 600_000
+CATEGORIES = ("Manual", "Adult", "Harmful", "Malware", "Gambling", "Social", "Other")
 DOMAIN_RE = re.compile(
     r"^(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
@@ -99,6 +100,16 @@ def normalize_target(raw: str) -> tuple[str, str]:
     return domain, "domain"
 
 
+def rule_target(raw: str) -> tuple[str, str]:
+    """Normalise a parent/teacher rule. "www.example.org" becomes "example.org"
+    so the wildcard DNS rule covers every subdomain of the site, not only
+    "*.www.example.org"."""
+    value, kind = normalize_target(raw)
+    if kind == "domain" and value.startswith("www.") and value.count(".") >= 2:
+        value = value[4:]
+    return value, kind
+
+
 def validate_account(username: str, password: str) -> None:
     username = username.strip()
     if not 3 <= len(username) <= 64 or any(char in username for char in "\r\n="):
@@ -114,7 +125,7 @@ def create_credentials_text(username: str, password: str) -> str:
         "sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS, dklen=32
     )
     return (
-        "# Eduka-Block 0.4.1 - Parent/Teacher credentials\n"
+        f"# Eduka-Block {APP_VERSION} - Parent/Teacher credentials\n"
         "# This is a readable text file, but the original password is never stored.\n"
         "# Edit only through Eduka-Block to avoid corrupting authentication.\n"
         f"username={username.strip()}\n"
@@ -172,3 +183,42 @@ def aliases_for_domain(domain: str) -> list[str]:
     elif len(labels) == 2:
         aliases.add(f"www.{domain}")
     return sorted(aliases)
+
+
+EXPORT_HEADER = "# Eduka-Block rule export. One website, domain, IP or CIDR per line."
+HOSTS_SINK_ADDRESSES = {"0.0.0.0", "127.0.0.1", "::", "::1"}
+
+
+def export_rules_text(entries: list[dict]) -> str:
+    """Serialise rules as plain text: ``target  # Category`` per line."""
+    lines = [EXPORT_HEADER, f"# Version {APP_VERSION}"]
+    for entry in sorted(entries, key=lambda item: str(item.get("value", ""))):
+        value = str(entry.get("value", "")).strip()
+        if value:
+            lines.append(f"{value}  # {entry.get('category', 'Manual')}")
+    return "\n".join(lines) + "\n"
+
+
+def parse_rules_text(text: str, default_category: str = "Manual") -> list[dict]:
+    """Read an exported list, a plain list or a hosts-style blocklist.
+
+    Validation happens again in the privileged helper; this only extracts
+    candidate targets and an optional ``# Category`` suffix.
+    """
+    items: list[dict] = []
+    seen: set[str] = set()
+    for raw_line in text.splitlines():
+        line, _, comment = raw_line.partition("#")
+        tokens = line.split()
+        if not tokens:
+            continue
+        if len(tokens) >= 2 and tokens[0] in HOSTS_SINK_ADDRESSES:
+            tokens = tokens[1:]
+        category = comment.strip()
+        if category not in CATEGORIES:
+            category = default_category
+        for token in tokens:
+            if token not in seen:
+                seen.add(token)
+                items.append({"target": token, "category": category})
+    return items

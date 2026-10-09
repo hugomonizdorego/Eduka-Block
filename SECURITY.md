@@ -1,4 +1,4 @@
-# Security model — Eduka-Block 0.4.1
+# Security model — Eduka-Block 0.5.2
 
 Eduka-Block separates its unprivileged GTK interface from a small root helper.
 
@@ -9,7 +9,7 @@ Eduka-Block separates its unprivileged GTK interface from a small root helper.
 3. `pkexec` and the installed PolicyKit action require an administrator before the helper runs as root.
 4. The helper validates every domain, IP address, category, identifier, download URL, response size, and state schema again.
 5. It never executes a shell or incorporates unvalidated input into a command line.
-6. A root-only process lock serializes UI, boot-service, and Smart IP timer mutations.
+6. A root-only process lock (`/run/eduka-block.lock`, in the root-owned `/run` directory rather than world-writable `/run/lock`) serializes UI, boot-service, and Smart IP timer mutations. Waiting is limited to 90 seconds. Slow DNS lookups and list downloads happen before the lock is taken.
 
 The version 0.2 security engine adds a NetworkManager/dnsmasq wildcard layer and a systemd smart-IP
 timer. Both invoke the same validated helper and use fixed file paths.
@@ -17,6 +17,13 @@ timer. Both invoke the same validated helper and use fixed file paths.
 The application password protects the interface from casual access. PolicyKit and the operating-system administrator account provide the actual privilege boundary. Someone who knows the root/administrator password can always remove or bypass local parental-control software.
 
 Changing the account from the login screen first verifies the current username and password. Writing the replacement credential file additionally requires PolicyKit administrator authorisation.
+
+## Account recovery
+
+- The Eduka-Block account only guards the interface; the operating-system administrator password is the real boundary. Recovery therefore requires that password and nothing else.
+- On the sign-in screen, *Forgot username or password?* runs the helper action `account-info` through pkexec. Only root can read the username that way; the password itself is never recoverable. A new password is then saved with `change-credentials`, which needs the same authorisation.
+- `eduka-block-reset` refuses to run without root and writes the credential file atomically with mode 0644.
+- Recovery never changes protection rules, lists or strict mode.
 
 ## Credentials
 
@@ -38,6 +45,7 @@ It never stores the original password. New and changed accounts require two matc
 - State changes attempt rollback if hosts or firewall application fails.
 - The nftables table uses the dedicated name `inet eduka_block` and only an output chain.
 - Each nftables update is syntax-checked, then deletes/recreates the dedicated table in one `nft -f` transaction. The previous table remains active if validation fails.
+- Overlapping or adjacent addresses and ranges are merged before rendering, because nftables interval sets reject overlapping elements.
 - NetworkManager wildcard rules are generated only for validated manual domains.
 - Smart DNS resolution reads the real upstream servers exposed by NetworkManager,
   falls back only when none are available, and accepts only public A/AAAA answers.
@@ -51,6 +59,35 @@ addresses can host unrelated services, so expanding one domain to an entire subn
 would create unsafe collateral blocking. Administrators can add a reviewed CIDR rule
 explicitly.
 
+## systemd-resolved bridge
+
+- When `/etc/resolv.conf` points to systemd-resolved, Eduka-Block writes `/etc/systemd/resolved.conf.d/eduka-block.conf` (`DNS=127.0.0.1`, `Domains=~.`), so lookups pass through NetworkManager's filtering dnsmasq.
+- The file is written only after dnsmasq answers a private health-check name with the expected address. It is removed when that check fails, during cleanup and in `postrm`. A stopped filter therefore fails open (normal DNS) instead of cutting the internet.
+
+## Strict mode (SafeSearch and anti-bypass)
+
+- SafeSearch pins search hosts to the providers' documented restricted endpoints (`forcesafesearch.google.com`, `restrictmoderate.youtube.com`, `strict.bing.com`, `safe.duckduckgo.com`) through `/etc/hosts`. Addresses are resolved during sync, with published fallbacks for offline boots. A host that is itself blocked is never re-opened by a SafeSearch record.
+- Anti-bypass only blocks encrypted DNS: well-known DoH hostnames in DNS, HTTPS/QUIC to well-known DoH resolver addresses, and DNS-over-TLS (port 853). Plain DNS on port 53 is untouched, so a system that uses those resolvers keeps working.
+- Browser policies use each browser's supported enterprise-policy location. The Firefox file is merged, not replaced: the previous values of the keys Eduka-Block sets are saved (`/var/lib/eduka-block/firefox-policies.original.json`, mode 0600) and restored when strict mode is turned off. Invalid policy files are left untouched and reported on stderr; the other layers still apply.
+
+## Category lists
+
+- Lists are fetched only from the hard-coded HTTPS URLs in `eduka_block_data.py` on `raw.githubusercontent.com`. Redirects to other hosts are rejected.
+- Size is capped at 16 MiB, each list must contain a plausible number of domains, and every domain is re-validated before it is written.
+- Downloads happen before the system lock is taken and are installed in one transaction. Cached files are restored if applying fails.
+
+## Offline installer
+
+- The `.run` file is a shell script plus a tar archive of `.deb` packages and an APT index. It is published with a SHA-256 checksum.
+- It configures a private, temporary APT source (`trusted=yes`, because the packages come from the verified bundle itself). The system's own sources and package lists are not modified.
+- Only packages the computer is missing are installed; APT never downgrades installed packages.
+
+## Import
+
+- Imported files are parsed by the unprivileged interface only to extract candidate targets; the helper validates every entry again with the same rules as a manual addition.
+- One import accepts at most 1,000 entries and a 256 KiB request. Duplicates, subdomains already covered by a blocked parent domain, and invalid lines are counted and skipped.
+- Imported domains receive smart IP addresses at the next synchronisation instead of resolving hundreds of names while the lock is held.
+
 ## Squid Proxy layer
 
 - Squid is an additional forward-proxy layer on `127.0.0.1:3128`. Version 0.4.1 both binds the managed listener to localhost and retains a defense-in-depth ACL that denies non-local clients, preventing a LAN/open proxy. Original active `http_port` directives are preserved as managed comments and restored when Squid protection is disabled.
@@ -61,9 +98,9 @@ explicitly.
 - Eduka-Block does not perform SSL bump, install a local certificate authority, or decrypt HTTPS content. For proxied HTTPS it filters the destination hostname exposed to the forward proxy, not encrypted paths or page bodies.
 - Keyword rules can cause false positives. Parents and teachers are responsible for reviewing broad terms such as `sex`.
 
-## Adult blocklist
+## Third-party lists
 
-The optional adult list is fetched only from the hard-coded HTTPS endpoint on `raw.githubusercontent.com`. Redirect destination, maximum byte size, minimum/maximum domain count, UTF-8 decoding, and every domain are validated. Third-party blocklist content can still contain false positives or omissions.
+Third-party blocklists can contain false positives or omissions. Parents and teachers can add their own rules at any time.
 
 ## Reporting
 

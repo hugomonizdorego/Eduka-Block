@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK for the interface smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 xvfb
+      - name: Compile sources
+        run: /usr/bin/python3 -m py_compile src/*.py tests/*.py
+      - name: Unit and interface tests
+        run: xvfb-run -a /usr/bin/python3 -m unittest discover -s tests -v
+      - name: Check shell scripts
+        run: for script in packaging/postinst packaging/prerm packaging/postrm build.sh tools/*.sh; do sh -n "$script"; done
+      - name: Build Debian package
+        run: ./build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eduka-block-deb
+          path: dist/*.deb
+
+  offline-installer:
+    # One file containing Eduka-Block and every dependency for Debian 13
+    # (Edukasaun OS), so computers without internet can install it.
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+      # Needed to bootstrap and chroot into the clean test system.
+      options: --privileged
+    steps:
+      - name: Prepare build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git dpkg-dev
+      - uses: actions/checkout@v4
+      - name: Build package and offline installer
+        run: |
+          ./build.sh
+          tools/build-offline-bundle.sh
+      - name: Test the installer offline on a clean minimal Debian 13
+        run: |
+          apt-get install -y --no-install-recommends mmdebstrap
+          mmdebstrap --variant=minbase trixie /tmp/clean http://deb.debian.org/debian
+          cp dist/*.run /tmp/clean/root/
+          printf '#!/bin/sh\nexit 101\n' > /tmp/clean/usr/sbin/policy-rc.d
+          chmod +x /tmp/clean/usr/sbin/policy-rc.d
+          chroot /tmp/clean sh -c 'cd /root && sh ./*.run --offline-only'
+          chroot /tmp/clean /usr/lib/eduka-block/eduka-block-helper status < /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eduka-block-offline-installer
+          path: |
+            dist/*.run
+            dist/*.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: offline-installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

@@ -10,14 +10,10 @@ install -d -o root -g root -m 0755 /usr/share/Eduka-Block
 if [ ! -e "$STATE_FILE" ]; then
     umask 022
     printf '%s\n' '{' \
-        '  "schema": 3,' \
+        '  "schema": 4,' \
         '  "entries": [],' \
-        '  "adult_protection": {' \
-        '    "enabled": false,' \
-        '    "domain_count": 0,' \
-        '    "source": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts",' \
-        '    "updated_at": null' \
-        '  },' \
+        '  "lists": {},' \
+        '  "strict_mode": {"enabled": true, "safe_ips": {}, "updated_at": null},' \
         '  "smart_sync": {"last_run": null},' \
         '  "squid_proxy": {' \
         '    "enabled": false,' \
@@ -34,23 +30,47 @@ if [ -e /usr/share/Eduka-Block/credentials.txt ]; then
     chmod 0644 /usr/share/Eduka-Block/credentials.txt
 fi
 
+# 0.4.1 and older used /run/lock, which is world-writable.
+rm -f /run/lock/eduka-block.lock
+
+# Is this a running system, or an image being built (Cubic, live-build,
+# debootstrap/chroot)? In an image nothing may be started or reloaded: the
+# chroot can share the host's /run and D-Bus, so nmcli or systemctl would act
+# on the host. The enabled units apply protection at the image's first boot.
+live_system() {
+    [ -d /run/systemd/system ] || return 1
+    # ischroot (debianutils, always installed); -t treats "cannot tell" as a
+    # chroot, which is the safe answer.
+    if command -v ischroot >/dev/null 2>&1 && ischroot -t; then
+        return 1
+    fi
+    return 0
+}
+
 if command -v systemctl >/dev/null 2>&1; then
+    # Enabling only creates symlinks, so it also works inside an image.
+    systemctl enable eduka-block-firewall.service eduka-block-sync.timer >/dev/null 2>&1 || true
+fi
+
+if live_system; then
+    # Load the dnsmasq DNS plugin setting before the firewall service applies
+    # rules, so the first apply already writes and reloads wildcard DNS rules.
+    if command -v nmcli >/dev/null 2>&1; then
+        nmcli general reload >/dev/null 2>&1 || true
+    fi
     systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl enable eduka-block-firewall.service >/dev/null 2>&1 || true
-    systemctl enable --now eduka-block-sync.timer >/dev/null 2>&1 || true
     systemctl restart eduka-block-firewall.service >/dev/null 2>&1 || true
-fi
+    systemctl start eduka-block-sync.timer >/dev/null 2>&1 || true
+    # One background sync: notices when dnsmasq becomes the resolver, moves the
+    # category lists out of /etc/hosts and refreshes SafeSearch addresses.
+    systemctl start --no-block eduka-block-sync.service >/dev/null 2>&1 || true
 
-if command -v nmcli >/dev/null 2>&1; then
-    nmcli general reload >/dev/null 2>&1 || true
-fi
-
-# Re-apply an existing Squid setting during upgrades so 0.4 installations gain
-# the localhost-only listener and reversible port migration immediately.
-if [ -x /usr/lib/eduka-block/eduka-block-helper ]; then
+    # Re-apply an existing Squid setting during upgrades.
     if ! /usr/lib/eduka-block/eduka-block-helper apply-squid </dev/null >/dev/null 2>&1; then
         printf '%s\n' 'Eduka-Block: existing Squid configuration needs review in the application.' >&2
     fi
+else
+    printf '%s\n' 'Eduka-Block: installed into an image; protection starts at the first boot.'
 fi
 
 if command -v update-desktop-database >/dev/null 2>&1; then

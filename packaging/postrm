@@ -4,6 +4,11 @@ set -e
 if [ "$1" = "purge" ]; then
     rm -f /var/lib/eduka-block/blocklist.json
     rm -f /var/lib/eduka-block/adult-domains.txt
+    rm -f /var/lib/eduka-block/gambling-domains.txt
+    rm -f /var/lib/eduka-block/social-domains.txt
+    rm -f /var/lib/eduka-block/malware-domains.txt
+    rm -f /var/lib/eduka-block/firefox-policies.original.json
+    rm -f /etc/NetworkManager/dnsmasq.d/eduka-block-lists.conf
     rm -f /var/lib/eduka-block/hosts.original-backup
     rm -f /var/lib/eduka-block/squid.conf.original-backup
     rm -f /etc/NetworkManager/dnsmasq.d/eduka-block.conf
@@ -12,6 +17,22 @@ if [ "$1" = "purge" ]; then
     rmdir /var/lib/eduka-block 2>/dev/null || true
     rm -f /usr/share/Eduka-Block/credentials.txt
     rmdir /usr/share/Eduka-Block 2>/dev/null || true
+    # Browser policy directories created for strict mode, only when empty.
+    for dir in /etc/chromium/policies/managed /etc/chromium-browser/policies/managed \
+        /etc/opt/chrome/policies/managed /etc/brave/policies/managed \
+        /etc/opt/edge/policies/managed /etc/firefox/policies; do
+        rmdir "$dir" "${dir%/*}" 2>/dev/null || true
+    done
+fi
+
+# Never leave systemd-resolved pointing at a filter that is no longer there.
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if [ -e /etc/systemd/resolved.conf.d/eduka-block.conf ]; then
+        rm -f /etc/systemd/resolved.conf.d/eduka-block.conf
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl try-restart systemd-resolved.service >/dev/null 2>&1 || true
+        fi
+    fi
 fi
 
 if command -v systemctl >/dev/null 2>&1; then

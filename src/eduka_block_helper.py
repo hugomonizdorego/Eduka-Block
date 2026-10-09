@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Privileged, narrowly-scoped system helper for Eduka-Block 0.4.1."""
+"""Privileged, narrowly-scoped system helper for Eduka-Block."""
 
 from __future__ import annotations
 
@@ -13,47 +13,82 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from eduka_block_common import (
     APP_SHARE_DIR,
+    DOMAIN_RE,
     APP_VERSION,
+    CATEGORIES,
     CREDENTIALS_PATH,
     ValidationError,
     aliases_for_domain,
     create_credentials_text,
     normalize_target,
+    read_credentials,
+    rule_target,
+)
+from eduka_block_data import (
+    BLOCKLISTS,
+    CHROMIUM_POLICIES,
+    CHROMIUM_POLICY_DIRS,
+    CHROMIUM_POLICY_NAME,
+    DOH_CANARY,
+    DOH_HOSTNAMES,
+    DOH_IPV4,
+    DOH_IPV6,
+    FIREFOX_POLICIES,
+    FIREFOX_POLICY_PATH,
+    MAX_LIST_DOMAINS,
+    PLATFORM_FAMILIES,
+    SAFE_SEARCH,
 )
 
 
 STATE_DIR = Path("/var/lib/eduka-block")
 STATE_PATH = STATE_DIR / "blocklist.json"
-ADULT_DOMAINS_PATH = STATE_DIR / "adult-domains.txt"
+FIREFOX_POLICY_BACKUP_PATH = STATE_DIR / "firefox-policies.original.json"
 HOSTS_PATH = Path("/etc/hosts")
 HOSTS_BACKUP_PATH = STATE_DIR / "hosts.original-backup"
 DNSMASQ_RULES_PATH = Path("/etc/NetworkManager/dnsmasq.d/eduka-block.conf")
+DNSMASQ_LISTS_PATH = Path("/etc/NetworkManager/dnsmasq.d/eduka-block-lists.conf")
+RESOLV_CONF_PATH = Path("/etc/resolv.conf")
+# Routes systemd-resolved (127.0.0.53) through NetworkManager's filtering
+# dnsmasq. Without it, systems that use resolved never consult the filter.
+RESOLVED_DROPIN_PATH = Path("/etc/systemd/resolved.conf.d/eduka-block.conf")
+DNSMASQ_ADDRESS = "127.0.0.1"
+RESOLVED_STUB = "127.0.0.53"
+# dnsmasq answers this name only when it runs with Eduka-Block's rules.
+HEALTH_CHECK_NAME = "eduka-block-check.invalid"
+HEALTH_CHECK_ADDRESS = "127.0.0.254"
 NETWORKMANAGER_CONFIG = Path("/etc/NetworkManager/conf.d/90-eduka-block-dns.conf")
 SQUID_MAIN_CONFIG = Path("/etc/squid/squid.conf")
 SQUID_CONFIG_PATH = Path("/etc/squid/eduka-block.conf")
 SQUID_KEYWORDS_PATH = Path("/etc/squid/eduka-block-keywords.txt")
 SQUID_BACKUP_PATH = STATE_DIR / "squid.conf.original-backup"
-LOCK_PATH = Path("/run/lock/eduka-block.lock")
+# /run is root-owned, unlike the world-writable /run/lock directory, so an
+# unprivileged user cannot pre-create or hold the lock file.
+LOCK_PATH = Path("/run/eduka-block.lock")
+LOCK_TIMEOUT_SECONDS = 90
 BEGIN_MARKER = "# BEGIN EDUKA-BLOCK MANAGED SECTION"
 END_MARKER = "# END EDUKA-BLOCK MANAGED SECTION"
 SQUID_BEGIN_MARKER = "# BEGIN EDUKA-BLOCK SQUID INCLUDE"
 SQUID_END_MARKER = "# END EDUKA-BLOCK SQUID INCLUDE"
 SQUID_ORIGINAL_PORT_PREFIX = "# EDUKA-BLOCK ORIGINAL HTTP_PORT: "
-ADULT_SOURCE_URL = (
-    "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts"
-)
+STATE_SCHEMA = 4
 MAX_DOWNLOAD_BYTES = 16 * 1024 * 1024
 MAX_SMART_DOMAINS = 250
-ALLOWED_CATEGORIES = {"Manual", "Adult", "Harmful", "Malware", "Gambling", "Social", "Other"}
+LIST_REFRESH_DAYS = 7
+MAX_IMPORT_ITEMS = 1000
+MAX_PAYLOAD_BYTES = 256 * 1024
+ALLOWED_CATEGORIES = set(CATEGORIES)
 MAX_SQUID_KEYWORDS = 100
 SQUID_KEYWORD_RE = re.compile(r"^[a-z0-9][a-z0-9 -]{0,38}[a-z0-9]$|^[a-z0-9]{2}$")
 DEFAULT_SQUID_KEYWORDS = [
@@ -82,16 +117,19 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def default_list_state() -> dict:
+    return {"enabled": False, "domain_count": 0, "updated_at": None}
+
+
 def default_state() -> dict:
     return {
-        "schema": 3,
+        "schema": STATE_SCHEMA,
         "entries": [],
-        "adult_protection": {
-            "enabled": False,
-            "domain_count": 0,
-            "source": ADULT_SOURCE_URL,
-            "updated_at": None,
-        },
+        "lists": {key: default_list_state() for key in BLOCKLISTS},
+        # Strict mode = SafeSearch + anti-bypass. On by default: without it a
+        # browser using encrypted DNS skips every DNS rule.
+        "strict_mode": {"enabled": True, "safe_ips": {}, "updated_at": None},
+        "dns_mode": None,
         "smart_sync": {"last_run": None},
         "squid_proxy": {
             "enabled": False,
@@ -103,9 +141,9 @@ def default_state() -> dict:
 
 def migrate_state(data: dict) -> dict:
     schema = data.get("schema")
-    if schema not in {1, 2, 3} or not isinstance(data.get("entries"), list):
+    if schema not in {1, 2, 3, STATE_SCHEMA} or not isinstance(data.get("entries"), list):
         raise HelperError("err_state_version")
-    data["schema"] = 3
+    data["schema"] = STATE_SCHEMA
     for entry in data["entries"]:
         if entry.get("kind") == "domain":
             entry.setdefault("smart", True)
@@ -114,8 +152,26 @@ def migrate_state(data: dict) -> dict:
         else:
             entry["smart"] = False
             entry["resolved_ips"] = []
-    if not isinstance(data.get("adult_protection"), dict):
-        data["adult_protection"] = default_state()["adult_protection"]
+    lists = data.get("lists")
+    if not isinstance(lists, dict):
+        lists = {}
+    # Schema <= 3 had a single adult list; its cache file name is unchanged.
+    legacy = data.pop("adult_protection", None)
+    if isinstance(legacy, dict) and "adult" not in lists:
+        lists["adult"] = {
+            "enabled": bool(legacy.get("enabled")),
+            "domain_count": int(legacy.get("domain_count") or 0),
+            "updated_at": legacy.get("updated_at"),
+        }
+    for key in BLOCKLISTS:
+        current = lists.get(key)
+        lists[key] = {**default_list_state(), **(current if isinstance(current, dict) else {})}
+    data["lists"] = {key: lists[key] for key in BLOCKLISTS}
+    strict = data.get("strict_mode")
+    if not isinstance(strict, dict):
+        strict = {}
+    data["strict_mode"] = {**default_state()["strict_mode"], **strict}
+    data.setdefault("dns_mode", None)
     data.setdefault("smart_sync", {"last_run": None})
     squid = data.get("squid_proxy")
     if not isinstance(squid, dict):
@@ -127,7 +183,8 @@ def migrate_state(data: dict) -> dict:
     return data
 
 
-def load_state(path: Path = STATE_PATH) -> dict:
+def load_state(path: Path | None = None) -> dict:
+    path = path or STATE_PATH
     if not path.exists():
         return default_state()
     try:
@@ -163,7 +220,15 @@ def exclusive_system_lock():
     descriptor = os.open(LOCK_PATH, flags, 0o600)
     try:
         os.fchmod(descriptor, 0o600)
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise HelperError("err_busy")
+                time.sleep(0.25)
         yield
     finally:
         fcntl.flock(descriptor, fcntl.LOCK_UN)
@@ -192,7 +257,7 @@ def squid_keyword_pattern(keyword: str) -> str:
 
 def render_squid_keywords(keywords: list[str], path: Path = SQUID_KEYWORDS_PATH) -> None:
     normalized = normalize_squid_keywords(keywords)
-    lines = ["# Generated by Eduka-Block 0.4.1. Use the application to edit."]
+    lines = [f"# Generated by Eduka-Block {APP_VERSION}. Use the application to edit."]
     lines.extend(squid_keyword_pattern(keyword) for keyword in normalized)
     atomic_write(path, "\n".join(lines) + "\n", 0o644)
 
@@ -200,7 +265,7 @@ def render_squid_keywords(keywords: list[str], path: Path = SQUID_KEYWORDS_PATH)
 def render_squid_config(path: Path = SQUID_CONFIG_PATH) -> None:
     content = "\n".join(
         [
-            "# Eduka-Block 0.4.1 managed Squid ACL",
+            f"# Eduka-Block {APP_VERSION} managed Squid ACL",
             "# Bind the managed proxy socket to this computer only.",
             "http_port 127.0.0.1:3128",
             "# These deny rules are inserted before Squid's allow rules.",
@@ -298,7 +363,8 @@ def remove_squid_files(main_path: Path = SQUID_MAIN_CONFIG) -> None:
             pass
 
 
-def save_state(data: dict, path: Path = STATE_PATH) -> None:
+def save_state(data: dict, path: Path | None = None) -> None:
+    path = path or STATE_PATH
     atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n", 0o644)
 
 
@@ -325,49 +391,220 @@ def remove_managed_section(content: str) -> str:
     return "\n".join(output).rstrip() + "\n"
 
 
-def adult_domains(path: Path = ADULT_DOMAINS_PATH) -> list[str]:
+def list_path(key: str, directory: Path | None = None) -> Path:
+    directory = directory or STATE_DIR
+    # "adult-domains.txt" keeps the file name used by versions up to 0.4.2.
+    return directory / f"{key}-domains.txt"
+
+
+def read_list_domains(path: Path) -> list[str]:
+    """Read a cached category list written by this helper (one domain per line)."""
     if not path.exists():
         return []
     domains: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        candidate = line.strip()
-        if not candidate:
-            continue
-        try:
-            normalized, kind = normalize_target(candidate)
-            if kind == "domain":
-                domains.append(normalized)
-        except ValidationError:
-            continue
+        candidate = line.strip().lower()
+        if candidate and DOMAIN_RE.fullmatch(candidate):
+            domains.append(candidate)
     return domains
+
+
+def enabled_list_domains(state: dict, directory: Path | None = None) -> set[str]:
+    domains: set[str] = set()
+    for key, settings in state.get("lists", {}).items():
+        if key in BLOCKLISTS and settings.get("enabled"):
+            domains.update(read_list_domains(list_path(key, directory)))
+    return domains
+
+
+def manual_domains(state: dict) -> list[str]:
+    return sorted({e["value"] for e in state["entries"] if e.get("kind") == "domain"})
+
+
+def strict_enabled(state: dict) -> bool:
+    return bool(state.get("strict_mode", {}).get("enabled"))
+
+
+def related_domains(domain: str) -> set[str]:
+    """Companion domains of a big platform (video CDNs, short links, APIs).
+
+    Blocking only "tiktok.com" leaves the app and the website working through
+    "tiktokv.com", "tiktokcdn.com" and others, so a rule for any member of a
+    family blocks the whole family.
+    """
+    for family in PLATFORM_FAMILIES:
+        if any(domain == member or domain.endswith("." + member) for member in family):
+            return set(family)
+    return set()
+
+
+def wildcard_blocked_domains(state: dict) -> set[str]:
+    """Domains blocked together with all of their subdomains."""
+    domains = set(manual_domains(state))
+    for domain in list(domains):
+        domains.update(related_domains(domain))
+    if strict_enabled(state):
+        domains.update(DOH_HOSTNAMES)
+    return domains
+
+
+def is_covered(name: str, domains: set[str]) -> bool:
+    labels = name.split(".")
+    return any(".".join(labels[index:]) in domains for index in range(len(labels) - 1))
+
+
+def safe_search_records(state: dict, blocked: set[str]) -> list[tuple[str, str]]:
+    """(address, hostname) pairs pinning search engines to their restricted mode."""
+    if not strict_enabled(state):
+        return []
+    resolved = state.get("strict_mode", {}).get("safe_ips", {})
+    records: list[tuple[str, str]] = []
+    for endpoint, settings in SAFE_SEARCH.items():
+        addresses = resolved.get(endpoint) or settings["fallback"]
+        for host in settings["hosts"]:
+            # A blocked site stays blocked; SafeSearch must not re-open it.
+            if is_covered(host, blocked):
+                continue
+            records.extend((address, host) for address in addresses)
+    return records
+
+
+def resolv_nameservers(resolv_path: Path | None = None) -> list[str]:
+    resolv_path = resolv_path or RESOLV_CONF_PATH
+    try:
+        content = resolv_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return []
+    return [
+        parts[1]
+        for parts in (line.split() for line in content.splitlines())
+        if len(parts) >= 2 and parts[0] == "nameserver"
+    ]
+
+
+def dnsmasq_answers() -> bool:
+    """True when NetworkManager's dnsmasq is running with Eduka-Block's rules."""
+    try:
+        import dns.exception
+        import dns.resolver
+    except ImportError:
+        return False
+    resolver = dns.resolver.Resolver(configure=False)
+    resolver.nameservers = [DNSMASQ_ADDRESS]
+    resolver.timeout = 1.0
+    resolver.lifetime = 2.0
+    try:
+        answer = resolver.resolve(HEALTH_CHECK_NAME, "A", search=False)
+    except (dns.exception.DNSException, OSError):
+        return False
+    return any(item.to_text() == HEALTH_CHECK_ADDRESS for item in answer)
+
+
+def detect_dns_mode(resolv_path: Path | None = None) -> str:
+    """"dnsmasq" when the filtering dnsmasq serves the system's lookups, else "hosts".
+
+    That is the case when /etc/resolv.conf points to it directly, or when it
+    points to systemd-resolved and dnsmasq is healthy, because apply_system()
+    then routes systemd-resolved through dnsmasq.
+    """
+    if not NETWORKMANAGER_CONFIG.exists():
+        return "hosts"
+    nameservers = resolv_nameservers(resolv_path)
+    if DNSMASQ_ADDRESS in nameservers:
+        return "dnsmasq"
+    if RESOLVED_STUB in nameservers and dnsmasq_answers():
+        return "dnsmasq"
+    return "hosts"
+
+
+def configure_resolved_bridge() -> bool:
+    """Send systemd-resolved's queries to the filtering dnsmasq, or undo it.
+
+    The bridge is only installed after dnsmasq proved it answers, and removed
+    as soon as it does not, so a stopped dnsmasq never breaks name lookups.
+    Returns True when the bridge is active.
+    """
+    wanted = (
+        NETWORKMANAGER_CONFIG.exists()
+        and RESOLVED_STUB in resolv_nameservers()
+        and dnsmasq_answers()
+    )
+    content = (
+        "# Eduka-Block: send every lookup through NetworkManager's filtering dnsmasq.\n"
+        "[Resolve]\n"
+        f"DNS={DNSMASQ_ADDRESS}\n"
+        "Domains=~.\n"
+    )
+    current = RESOLVED_DROPIN_PATH.read_text(encoding="utf-8") if RESOLVED_DROPIN_PATH.exists() else None
+    if wanted and current != content:
+        RESOLVED_DROPIN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(RESOLVED_DROPIN_PATH, content, 0o644)
+        restart_resolved()
+    elif not wanted and current is not None:
+        RESOLVED_DROPIN_PATH.unlink()
+        restart_resolved()
+    return wanted
+
+
+def restart_resolved() -> None:
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        subprocess.run(
+            [systemctl, "try-restart", "systemd-resolved.service"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+
+def flush_dns_caches() -> None:
+    """Make new rules effective at once instead of after cached answers expire."""
+    resolvectl = shutil.which("resolvectl")
+    if resolvectl:
+        subprocess.run(
+            [resolvectl, "flush-caches"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+        )
 
 
 def render_hosts(
     state: dict,
-    hosts_path: Path = HOSTS_PATH,
-    adult_path: Path = ADULT_DOMAINS_PATH,
-    backup_path: Path = HOSTS_BACKUP_PATH,
+    hosts_path: Path | None = None,
+    backup_path: Path | None = None,
+    list_domains: set[str] | None = None,
+    lists_in_hosts: bool = True,
 ) -> None:
+    hosts_path = hosts_path or HOSTS_PATH
+    backup_path = backup_path or HOSTS_BACKUP_PATH
     try:
         current = hosts_path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise HelperError("err_hosts_read") from exc
     if not backup_path.exists():
         atomic_write(backup_path, current, 0o600)
+    if list_domains is None:
+        list_domains = enabled_list_domains(state)
 
     clean = remove_managed_section(current)
-    domains: set[str] = set()
-    for entry in state["entries"]:
-        if entry.get("kind") == "domain":
-            domains.update(aliases_for_domain(entry["value"]))
-    if state["adult_protection"].get("enabled"):
-        domains.update(adult_domains(adult_path))
+    wildcard = wildcard_blocked_domains(state)
+    exact: set[str] = set()
+    for domain in wildcard:
+        exact.update(aliases_for_domain(domain))
+    # Large category lists stay out of /etc/hosts when dnsmasq serves them:
+    # every name lookup scans this file from top to bottom.
+    listed = sorted(list_domains - exact) if lists_in_hosts else []
+    safe = safe_search_records(state, wildcard | list_domains)
 
-    if domains:
+    if exact or listed or safe:
         managed = ["", BEGIN_MARKER, "# Generated by Eduka-Block. Use the app to edit."]
-        for domain in sorted(domains):
+        for domain in sorted(exact):
             managed.append(f"0.0.0.0 {domain}")
             managed.append(f":: {domain}")
+        if safe:
+            managed.append("# SafeSearch")
+            managed.extend(f"{address} {host}" for address, host in safe)
+        if listed:
+            managed.append("# Category lists")
+            managed.extend(f"0.0.0.0 {domain}" for domain in listed)
         managed.extend([END_MARKER, ""])
         new_content = clean.rstrip() + "\n" + "\n".join(managed)
     else:
@@ -395,27 +632,51 @@ def render_hosts(
             pass
 
 
-def manual_domains(state: dict) -> list[str]:
-    return sorted({e["value"] for e in state["entries"] if e.get("kind") == "domain"})
-
-
-def render_dnsmasq(state: dict, path: Path = DNSMASQ_RULES_PATH) -> None:
-    domains = manual_domains(state)
-    if not domains:
+def _write_or_remove(path: Path, lines: list[str]) -> None:
+    if lines:
+        atomic_write(path, "\n".join(lines) + "\n", 0o644)
+    else:
         try:
             path.unlink()
         except FileNotFoundError:
             pass
-        return
+
+
+def render_dnsmasq(
+    state: dict,
+    path: Path | None = None,
+    lists_path: Path | None = None,
+    list_domains: set[str] | None = None,
+    lists_in_dnsmasq: bool = False,
+) -> None:
+    path = path or DNSMASQ_RULES_PATH
+    lists_path = lists_path or DNSMASQ_LISTS_PATH
+    domains = sorted(wildcard_blocked_domains(state))
     lines = [
-        "# Eduka-Block 0.4.1 - generated file",
+        f"# Eduka-Block {APP_VERSION} - generated file",
         "# Blocks each selected domain and every subdomain.",
+        "# Health check: proves this dnsmasq runs with Eduka-Block's rules.",
+        f"address=/{HEALTH_CHECK_NAME}/{HEALTH_CHECK_ADDRESS}",
     ]
     for domain in domains:
         lines.append(f"local=/{domain}/")
         lines.append(f"address=/{domain}/0.0.0.0")
         lines.append(f"address=/{domain}/::")
-    atomic_write(path, "\n".join(lines) + "\n", 0o644)
+    if strict_enabled(state):
+        lines.append("# Tell Firefox not to switch to DNS-over-HTTPS (answers NXDOMAIN).")
+        lines.append(f"address=/{DOH_CANARY}/")
+    _write_or_remove(path, lines)
+
+    listed: list[str] = []
+    if lists_in_dnsmasq:
+        if list_domains is None:
+            list_domains = enabled_list_domains(state)
+        listed = sorted(list_domains)
+    _write_or_remove(
+        lists_path,
+        ([f"# Eduka-Block {APP_VERSION} - category lists (NXDOMAIN, all subdomains)"]
+         + [f"address=/{domain}/" for domain in listed]) if listed else [],
+    )
 
 
 def reload_dns_plugin(full: bool = True) -> bool:
@@ -555,27 +816,86 @@ def clear_firewall() -> None:
     )
 
 
+def _collapsed(networks: list) -> list[str]:
+    """Merge overlapping/adjacent ranges; nft interval sets reject overlaps."""
+    output: list[str] = []
+    for network in ipaddress.collapse_addresses(networks):
+        if network.prefixlen == network.max_prefixlen:
+            output.append(network.network_address.compressed)
+        else:
+            output.append(network.with_prefixlen)
+    return output
+
+
 def firewall_elements(state: dict) -> tuple[list[str], list[str]]:
-    ipv4: set[str] = set()
-    ipv6: set[str] = set()
+    ipv4: list = []
+    ipv6: list = []
     for entry in state["entries"]:
         kind = entry.get("kind")
-        if kind in {"ipv4", "ipv4_network"}:
-            ipv4.add(entry["value"])
-        elif kind in {"ipv6", "ipv6_network"}:
-            ipv6.add(entry["value"])
-        if kind == "domain" and entry.get("smart"):
-            for raw in entry.get("resolved_ips", []):
-                try:
-                    address = ipaddress.ip_address(raw)
-                except ValueError:
-                    continue
-                (ipv4 if address.version == 4 else ipv6).add(address.compressed)
-    return sorted(ipv4), sorted(ipv6)
+        raw_values: list = []
+        if kind in {"ipv4", "ipv4_network", "ipv6", "ipv6_network"}:
+            raw_values = [entry.get("value")]
+        elif kind == "domain" and entry.get("smart"):
+            raw_values = list(entry.get("resolved_ips", []))
+        for raw in raw_values:
+            try:
+                network = ipaddress.ip_network(str(raw), strict=False)
+            except ValueError:
+                continue
+            (ipv4 if network.version == 4 else ipv6).append(network)
+    return _collapsed(ipv4), _collapsed(ipv6)
+
+
+def build_ruleset(state: dict, table_exists: bool) -> str:
+    """Return the complete nft script replacing the ``inet eduka_block`` table."""
+    ipv4, ipv6 = firewall_elements(state)
+    strict = strict_enabled(state)
+    doh4 = _collapsed([ipaddress.ip_network(value) for value in DOH_IPV4]) if strict else []
+    doh6 = _collapsed([ipaddress.ip_network(value) for value in DOH_IPV6]) if strict else []
+    lines: list[str] = []
+    if table_exists:
+        lines.append("delete table inet eduka_block")
+    if not (ipv4 or ipv6 or strict):
+        return "\n".join(lines) + "\n" if lines else ""
+
+    def add_set(name: str, family: str, elements: list[str]) -> None:
+        lines.extend(
+            [
+                f"  set {name} {{",
+                f"    type {family}",
+                "    flags interval",
+                f"    elements = {{ {', '.join(elements)} }}",
+                "  }",
+            ]
+        )
+
+    lines.append("table inet eduka_block {")
+    if ipv4:
+        add_set("blocked_ipv4", "ipv4_addr", ipv4)
+    if ipv6:
+        add_set("blocked_ipv6", "ipv6_addr", ipv6)
+    if doh4:
+        add_set("doh_ipv4", "ipv4_addr", doh4)
+    if doh6:
+        add_set("doh_ipv6", "ipv6_addr", doh6)
+    lines.extend(["  chain output {", "    type filter hook output priority 0; policy accept;"])
+    if ipv4:
+        lines.append("    ip daddr @blocked_ipv4 drop")
+    if ipv6:
+        lines.append("    ip6 daddr @blocked_ipv6 drop")
+    if strict:
+        # Encrypted DNS would bypass every DNS rule: block DNS-over-TLS
+        # everywhere and HTTPS/QUIC to well-known public DoH resolvers.
+        lines.append("    meta l4proto { tcp, udp } th dport 853 drop")
+        if doh4:
+            lines.append("    ip daddr @doh_ipv4 meta l4proto { tcp, udp } th dport 443 drop")
+        if doh6:
+            lines.append("    ip6 daddr @doh_ipv6 meta l4proto { tcp, udp } th dport 443 drop")
+    lines.extend(["  }", "}"])
+    return "\n".join(lines) + "\n"
 
 
 def apply_firewall(state: dict) -> None:
-    ipv4, ipv6 = firewall_elements(state)
     binary = nft_binary()
     exists = subprocess.run(
         [binary, "list", "table", "inet", "eduka_block"],
@@ -583,41 +903,9 @@ def apply_firewall(state: dict) -> None:
         stderr=subprocess.DEVNULL,
         check=False,
     ).returncode == 0
-    lines: list[str] = []
-    if exists:
-        lines.append("delete table inet eduka_block")
-    if ipv4 or ipv6:
-        lines.append("table inet eduka_block {")
-    if ipv4:
-        lines.extend(
-            [
-                "  set blocked_ipv4 {",
-                "    type ipv4_addr",
-                "    flags interval",
-                f"    elements = {{ {', '.join(ipv4)} }}",
-                "  }",
-            ]
-        )
-    if ipv6:
-        lines.extend(
-            [
-                "  set blocked_ipv6 {",
-                "    type ipv6_addr",
-                "    flags interval",
-                f"    elements = {{ {', '.join(ipv6)} }}",
-                "  }",
-            ]
-        )
-    if ipv4 or ipv6:
-        lines.extend(["  chain output {", "    type filter hook output priority 0; policy accept;"])
-        if ipv4:
-            lines.append("    ip daddr @blocked_ipv4 drop")
-        if ipv6:
-            lines.append("    ip6 daddr @blocked_ipv6 drop")
-        lines.extend(["  }", "}"])
-    if not lines:
+    ruleset = build_ruleset(state, exists)
+    if not ruleset:
         return
-    ruleset = "\n".join(lines) + "\n"
     checked = subprocess.run(
         [binary, "--check", "-f", "-"],
         input=ruleset,
@@ -634,14 +922,108 @@ def apply_firewall(state: dict) -> None:
         raise HelperError("err_firewall", result.stderr.strip())
 
 
-def apply_system(state: dict) -> None:
-    render_hosts(state)
-    render_dnsmasq(state)
+def _read_json(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise HelperError("err_browser_policy", str(path))
+    if not isinstance(data, dict):
+        raise HelperError("err_browser_policy", str(path))
+    return data
+
+
+def apply_firefox_policy(
+    enabled: bool,
+    path: Path | None = None,
+    backup_path: Path | None = None,
+) -> None:
+    """Merge Eduka-Block's keys into Firefox policies and undo them precisely.
+
+    The administrator's other policies are kept. The previous value of every
+    key we set is saved once, so disabling restores exactly what was there.
+    """
+    path = path or FIREFOX_POLICY_PATH
+    backup_path = backup_path or FIREFOX_POLICY_BACKUP_PATH
+    current = _read_json(path)
+    if enabled:
+        data = current or {}
+        policies = data.setdefault("policies", {})
+        if not isinstance(policies, dict):
+            raise HelperError("err_browser_policy", str(path))
+        if not backup_path.exists():
+            previous = {key: policies[key] for key in FIREFOX_POLICIES if key in policies}
+            atomic_write(
+                backup_path,
+                json.dumps({"file_existed": current is not None, "previous": previous}, indent=2),
+                0o600,
+            )
+        policies.update(json.loads(json.dumps(FIREFOX_POLICIES)))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", 0o644)
+        return
+    try:
+        backup = json.loads(backup_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return  # Nothing of ours to undo.
+    if current is not None:
+        policies = current.get("policies", {})
+        if isinstance(policies, dict):
+            for key in FIREFOX_POLICIES:
+                policies.pop(key, None)
+            policies.update(backup.get("previous", {}))
+            if not policies and not backup.get("file_existed") and set(current) <= {"policies"}:
+                path.unlink()
+            else:
+                atomic_write(path, json.dumps(current, indent=2, ensure_ascii=False) + "\n", 0o644)
+    backup_path.unlink()
+
+
+def apply_chromium_policies(enabled: bool, directories: tuple[Path, ...] | None = None) -> None:
+    directories = directories or CHROMIUM_POLICY_DIRS
+    content = json.dumps(CHROMIUM_POLICIES, indent=2) + "\n"
+    for directory in directories:
+        path = directory / CHROMIUM_POLICY_NAME
+        if enabled:
+            directory.mkdir(parents=True, exist_ok=True, mode=0o755)
+            atomic_write(path, content, 0o644)
+        else:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def apply_browser_policies(state: dict) -> bool:
+    """Best effort: a broken third-party policy file must not undo other layers."""
+    enabled = strict_enabled(state)
+    ok = True
+    for apply in (apply_chromium_policies, apply_firefox_policy):
+        try:
+            apply(enabled)
+        except (HelperError, OSError) as exc:
+            ok = False
+            print(f"eduka-block: browser policy not applied: {exc}", file=sys.stderr)
+    return ok
+
+
+def apply_system(state: dict) -> str:
+    """Apply every protection layer; return the DNS mode that was used."""
+    mode = detect_dns_mode()
+    list_domains = enabled_list_domains(state)
+    render_hosts(state, list_domains=list_domains, lists_in_hosts=mode != "dnsmasq")
+    render_dnsmasq(state, list_domains=list_domains, lists_in_dnsmasq=mode == "dnsmasq")
     apply_firewall(state)
+    apply_browser_policies(state)
     reload_dns_plugin(full=True)
+    configure_resolved_bridge()
+    flush_dns_caches()
+    return mode
 
 
 def apply_transaction(old_state: dict, new_state: dict) -> None:
+    new_state["dns_mode"] = detect_dns_mode()
     save_state(new_state)
     try:
         apply_system(new_state)
@@ -707,35 +1089,109 @@ def resolve_domain_ips(domain: str, nameservers: list[str] | None = None) -> lis
     return sorted(addresses)
 
 
-def sync_smart_ips() -> None:
-    require_root()
-    state = load_state()
-    changed = False
-    processed = 0
+def resolve_smart_domains(state: dict) -> dict[str, list[str]]:
+    """Resolve smart domains. Runs before the lock so slow DNS never blocks the UI."""
+    resolved: dict[str, list[str]] = {}
     nameservers = parse_resolv_nameservers()
     for entry in state["entries"]:
         if entry.get("kind") != "domain" or not entry.get("smart"):
             continue
-        if processed >= MAX_SMART_DOMAINS:
+        if len(resolved) >= MAX_SMART_DOMAINS:
             break
-        processed += 1
-        addresses = resolve_domain_ips(entry["value"], nameservers)
+        domain = entry["value"]
+        if domain not in resolved:
+            resolved[domain] = resolve_domain_ips(domain, nameservers)
+    return resolved
+
+
+def resolve_safe_ips() -> dict[str, list[str]]:
+    nameservers = parse_resolv_nameservers()
+    resolved: dict[str, list[str]] = {}
+    for endpoint in SAFE_SEARCH:
+        addresses = resolve_domain_ips(endpoint, nameservers)
+        if addresses:
+            resolved[endpoint] = addresses
+    return resolved
+
+
+def list_is_stale(settings: dict, max_age_days: int = LIST_REFRESH_DAYS) -> bool:
+    updated = settings.get("updated_at")
+    if not updated:
+        return True
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(str(updated))
+    except ValueError:
+        return True
+    return age.days >= max_age_days
+
+
+def prepare_sync(state: dict) -> dict:
+    """Network work for the timer: DNS answers, SafeSearch IPs, stale lists."""
+    refreshed: dict[str, list[str]] = {}
+    for key, settings in state.get("lists", {}).items():
+        if key in BLOCKLISTS and settings.get("enabled") and list_is_stale(settings):
+            try:
+                refreshed[key] = download_blocklist(key)
+            except HelperError:
+                continue  # Keep the cached copy; try again on the next run.
+    return {
+        "domains": resolve_smart_domains(state),
+        "safe_ips": resolve_safe_ips() if strict_enabled(state) else {},
+        "lists": refreshed,
+    }
+
+
+def sync_smart_ips(
+    resolved: dict[str, list[str]] | None = None,
+    safe_ips: dict[str, list[str]] | None = None,
+    lists: dict[str, list[str]] | None = None,
+) -> None:
+    require_root()
+    if resolved is None:
+        prepared = prepare_sync(load_state())
+        resolved, safe_ips, lists = prepared["domains"], prepared["safe_ips"], prepared["lists"]
+    # Re-read under the lock: rules may have changed while DNS was queried.
+    state = load_state()
+    ips_changed = False
+    for entry in state["entries"]:
+        if entry.get("kind") != "domain" or not entry.get("smart"):
+            continue
+        addresses = resolved.get(entry["value"])
         if addresses:
             if addresses != entry.get("resolved_ips", []):
                 entry["resolved_ips"] = addresses
-                changed = True
+                ips_changed = True
             entry["last_resolved_at"] = now_iso()
-    state["smart_sync"] = {"last_run": now_iso(), "processed": processed}
+    full_apply = False
+    strict = state["strict_mode"]
+    if safe_ips and strict.get("enabled") and safe_ips != strict.get("safe_ips"):
+        strict["safe_ips"] = safe_ips
+        strict["updated_at"] = now_iso()
+        full_apply = True
+    for key, domains in (lists or {}).items():
+        if state["lists"].get(key, {}).get("enabled"):
+            atomic_write(list_path(key), "\n".join(domains) + "\n", 0o644)
+            state["lists"][key].update(domain_count=len(domains), updated_at=now_iso())
+            full_apply = True
+    mode = detect_dns_mode()
+    if mode != state.get("dns_mode"):
+        # NetworkManager switched resolvers since the last apply (e.g. after
+        # installation): move category lists between dnsmasq and /etc/hosts.
+        full_apply = True
+    state["dns_mode"] = mode
+    state["smart_sync"] = {"last_run": now_iso(), "processed": len(resolved)}
     save_state(state)
-    if changed:
+    if full_apply:
+        apply_system(state)
+    elif ips_changed:
         apply_firewall(state)
 
 
-def parse_hosts_download(content: str) -> list[str]:
+def parse_hosts_download(content: str, min_domains: int = 1_000) -> list[str]:
     domains: set[str] = set()
     for line in content.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped:
             continue
         mapping_seen = False
         for token in stripped.split():
@@ -750,34 +1206,35 @@ def parse_hosts_download(content: str) -> list[str]:
                     domains.add(normalized)
             except ValidationError:
                 continue
-    if not 1_000 <= len(domains) <= 250_000:
-        raise HelperError("err_adult_integrity")
+    if not min_domains <= len(domains) <= MAX_LIST_DOMAINS:
+        raise HelperError("err_list_integrity")
     return sorted(domains)
 
 
-def download_adult_domains() -> list[str]:
+def download_blocklist(key: str) -> list[str]:
+    if key not in BLOCKLISTS:
+        raise HelperError("err_request_format")
+    source = BLOCKLISTS[key]
     request = urllib.request.Request(
-        ADULT_SOURCE_URL,
+        source["url"],
         headers={"User-Agent": f"Eduka-Block/{APP_VERSION} (+https://edukasaunos.tl)"},
     )
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
-            from urllib.parse import urlsplit
-
             final = urlsplit(response.geturl())
             if final.scheme != "https" or final.hostname != "raw.githubusercontent.com":
-                raise HelperError("err_adult_redirect")
+                raise HelperError("err_list_redirect")
             data = response.read(MAX_DOWNLOAD_BYTES + 1)
     except HelperError:
         raise
     except (OSError, urllib.error.URLError) as exc:
-        raise HelperError("err_adult_download") from exc
+        raise HelperError("err_list_download") from exc
     if len(data) > MAX_DOWNLOAD_BYTES:
-        raise HelperError("err_adult_large")
+        raise HelperError("err_list_large")
     try:
-        return parse_hosts_download(data.decode("utf-8"))
+        return parse_hosts_download(data.decode("utf-8"), source["min_domains"])
     except UnicodeError as exc:
-        raise HelperError("err_adult_encoding") from exc
+        raise HelperError("err_list_encoding") from exc
 
 
 def require_root() -> None:
@@ -786,8 +1243,8 @@ def require_root() -> None:
 
 
 def read_payload() -> dict:
-    raw = sys.stdin.read(16_385)
-    if len(raw) > 16_384:
+    raw = sys.stdin.read(MAX_PAYLOAD_BYTES + 1)
+    if len(raw) > MAX_PAYLOAD_BYTES:
         raise HelperError("err_request_large")
     if not raw.strip():
         return {}
@@ -815,24 +1272,55 @@ def public_status() -> dict:
     squid = json.loads(json.dumps(state.get("squid_proxy", default_state()["squid_proxy"])))
     squid["installed"] = bool(squid_binary(required=False))
     squid["running"] = squid_running()
+    list_total = sum(
+        int(settings.get("domain_count") or 0)
+        for settings in state["lists"].values()
+        if settings.get("enabled")
+    )
+    # The stored mode is refreshed by every apply and sync; probing here would
+    # make each status request wait on DNS.
+    dns_mode = state.get("dns_mode") or "hosts"
     return {
         "version": APP_VERSION,
         "configured": credentials_configured(),
-        "entries": state["entries"],
-        "adult_protection": state["adult_protection"],
+        "entries": [
+            {**entry, "related_count": len(related_domains(entry["value"]) - {entry["value"]})}
+            if entry.get("kind") == "domain"
+            else entry
+            for entry in state["entries"]
+        ],
+        "lists": state["lists"],
+        "strict_mode": {
+            "enabled": strict_enabled(state),
+            "updated_at": state["strict_mode"].get("updated_at"),
+        },
+        "browser_policies": any(
+            (directory / CHROMIUM_POLICY_NAME).exists() for directory in CHROMIUM_POLICY_DIRS
+        ),
         "squid_proxy": squid,
         "smart_sync": state.get("smart_sync", {}),
         "manual_count": len(state["entries"]),
+        "list_domain_count": list_total,
         "tracked_ip_count": len(tracked),
-        "total_count": len(state["entries"])
-        + int(state["adult_protection"].get("domain_count", 0))
-        + len(tracked),
-        "dns_engine": bool(
-            NETWORKMANAGER_CONFIG.exists()
-            and shutil.which("nmcli")
-            and (shutil.which("dnsmasq") or Path("/usr/sbin/dnsmasq").exists())
-        ),
+        "total_count": len(state["entries"]) + list_total + len(tracked),
+        "dns_mode": dns_mode,
+        "dns_engine": dns_mode == "dnsmasq",
     }
+
+
+def account_info() -> dict:
+    """Return the stored parent/teacher username for account recovery.
+
+    Only reachable through pkexec (root): proving the operating-system
+    administrator password is what entitles someone to recover the account.
+    """
+    require_root()
+    if not credentials_configured():
+        return {"username": ""}
+    try:
+        return {"username": read_credentials(CREDENTIALS_PATH)["username"]}
+    except ValidationError:
+        return {"username": ""}  # Damaged file: the account can still be replaced.
 
 
 def setup_credentials(payload: dict, replace: bool = False) -> None:
@@ -844,67 +1332,166 @@ def setup_credentials(payload: dict, replace: bool = False) -> None:
     atomic_write(CREDENTIALS_PATH, text, 0o644)
 
 
+def clean_category(raw: object) -> str:
+    category = str(raw or "Manual")
+    return category if category in ALLOWED_CATEGORIES else "Other"
+
+
+def covering_domain(domain: str, entries: list[dict]) -> str | None:
+    """Return an existing domain rule whose wildcard already covers ``domain``."""
+    blocked = {entry.get("value") for entry in entries if entry.get("kind") == "domain"}
+    labels = domain.split(".")
+    for index in range(1, len(labels) - 1):
+        parent = ".".join(labels[index:])
+        if parent in blocked:
+            return parent
+    return None
+
+
+def new_entry(value: str, kind: str, category: str, smart: bool, resolved_ips: list[str]) -> dict:
+    return {
+        "id": str(uuid.uuid4()),
+        "value": value,
+        "kind": kind,
+        "category": category,
+        "smart": smart,
+        "resolved_ips": resolved_ips,
+        "last_resolved_at": now_iso() if resolved_ips else None,
+        "created_at": now_iso(),
+    }
+
+
 def add_entry(payload: dict) -> None:
     require_root()
-    value, kind = normalize_target(str(payload.get("target", "")))
-    category = str(payload.get("category", "Manual"))
-    if category not in ALLOWED_CATEGORIES:
-        category = "Other"
+    value, kind = rule_target(str(payload.get("target", "")))
+    category = clean_category(payload.get("category"))
     old = load_state()
     if any(entry.get("value") == value for entry in old["entries"]):
         raise HelperError("err_duplicate")
+    if kind == "domain":
+        parent = covering_domain(value, old["entries"])
+        if parent:
+            raise HelperError("err_covered", parent)
     smart = kind == "domain" and bool(payload.get("smart", True))
     resolved_ips = resolve_domain_ips(value) if smart else []
     new = json.loads(json.dumps(old))
-    new["entries"].append(
-        {
-            "id": str(uuid.uuid4()),
-            "value": value,
-            "kind": kind,
-            "category": category,
-            "smart": smart,
-            "resolved_ips": resolved_ips,
-            "last_resolved_at": now_iso() if resolved_ips else None,
-            "created_at": now_iso(),
-        }
-    )
+    new["entries"].append(new_entry(value, kind, category, smart, resolved_ips))
     apply_transaction(old, new)
 
 
-def remove_entry(payload: dict) -> None:
+def import_entries(payload: dict) -> dict:
+    """Add many rules in one transaction. Smart IPs are learned by the next sync."""
     require_root()
-    entry_id = str(payload.get("id", ""))
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise HelperError("err_import_empty")
+    if len(items) > MAX_IMPORT_ITEMS:
+        raise HelperError("err_import_large")
+    smart_requested = bool(payload.get("smart", True))
     old = load_state()
     new = json.loads(json.dumps(old))
-    new["entries"] = [entry for entry in new["entries"] if entry.get("id") != entry_id]
+    known = {entry.get("value") for entry in new["entries"]}
+    added = skipped = invalid = 0
+    for item in items:
+        if not isinstance(item, dict):
+            invalid += 1
+            continue
+        try:
+            value, kind = rule_target(str(item.get("target", "")))
+        except ValidationError:
+            invalid += 1
+            continue
+        if value in known or (kind == "domain" and covering_domain(value, new["entries"])):
+            skipped += 1
+            continue
+        smart = kind == "domain" and smart_requested
+        new["entries"].append(new_entry(value, kind, clean_category(item.get("category")), smart, []))
+        known.add(value)
+        added += 1
+    if added:
+        apply_transaction(old, new)
+    return {"added": added, "skipped": skipped, "invalid": invalid}
+
+
+def remove_entry(payload: dict) -> None:
+    """Remove one rule (``id``) or several rules (``ids``) in one transaction."""
+    require_root()
+    raw_ids = payload.get("ids")
+    if raw_ids is None:
+        raw_ids = [payload.get("id", "")]
+    if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > MAX_IMPORT_ITEMS:
+        raise HelperError("err_request_format")
+    entry_ids = {str(value) for value in raw_ids}
+    old = load_state()
+    new = json.loads(json.dumps(old))
+    new["entries"] = [entry for entry in new["entries"] if entry.get("id") not in entry_ids]
     if len(new["entries"]) == len(old["entries"]):
         raise HelperError("err_not_found")
     apply_transaction(old, new)
 
 
-def enable_adult_protection() -> None:
+def prepare_protection(payload: dict) -> dict:
+    """Download the lists a protection change needs, before taking the lock."""
+    requested = validated_list_request(payload)
+    state = load_state()
+    refresh = bool(payload.get("refresh"))
+    downloads: dict[str, list[str]] = {}
+    for key, enabled in requested.items():
+        currently = state["lists"][key]
+        if enabled and (refresh or not currently.get("enabled") or not list_path(key).exists()):
+            downloads[key] = download_blocklist(key)
+    if refresh:
+        # "Update all" also refreshes lists that stay enabled but were not named.
+        for key, settings in state["lists"].items():
+            if settings.get("enabled") and key not in requested:
+                downloads[key] = download_blocklist(key)
+    strict = payload.get("strict", strict_enabled(state))
+    return {"lists": downloads, "safe_ips": resolve_safe_ips() if strict else {}}
+
+
+def validated_list_request(payload: dict) -> dict[str, bool]:
+    requested = payload.get("lists", {})
+    if not isinstance(requested, dict) or any(key not in BLOCKLISTS for key in requested):
+        raise HelperError("err_request_format")
+    return {key: bool(value) for key, value in requested.items()}
+
+
+def configure_protection(payload: dict, prepared: dict | None = None) -> None:
+    """Turn category lists and strict mode on/off in one transaction."""
     require_root()
-    domains = download_adult_domains()
-    previous_content = ADULT_DOMAINS_PATH.read_text(encoding="utf-8") if ADULT_DOMAINS_PATH.exists() else None
-    atomic_write(ADULT_DOMAINS_PATH, "\n".join(domains) + "\n", 0o644)
+    requested = validated_list_request(payload)
+    if prepared is None:
+        prepared = prepare_protection(payload)
     old = load_state()
     new = json.loads(json.dumps(old))
-    new["adult_protection"] = {
-        "enabled": True,
-        "domain_count": len(domains),
-        "source": ADULT_SOURCE_URL,
-        "updated_at": now_iso(),
-    }
+    for key, enabled in requested.items():
+        new["lists"][key]["enabled"] = enabled
+    if "strict" in payload:
+        new["strict_mode"]["enabled"] = bool(payload["strict"])
+    if prepared.get("safe_ips"):
+        new["strict_mode"]["safe_ips"] = prepared["safe_ips"]
+        new["strict_mode"]["updated_at"] = now_iso()
+
+    previous: dict[Path, str | None] = {}
     try:
+        for key, domains in prepared.get("lists", {}).items():
+            path = list_path(key)
+            previous[path] = path.read_text(encoding="utf-8") if path.exists() else None
+            atomic_write(path, "\n".join(domains) + "\n", 0o644)
+            new["lists"][key].update(domain_count=len(domains), updated_at=now_iso())
+        for key, settings in new["lists"].items():
+            if settings["enabled"] and not list_path(key).exists():
+                raise HelperError("err_list_download")
         apply_transaction(old, new)
     except Exception:
-        if previous_content is None:
-            try:
-                ADULT_DOMAINS_PATH.unlink()
-            except FileNotFoundError:
-                pass
-        else:
-            atomic_write(ADULT_DOMAINS_PATH, previous_content, 0o644)
+        for path, content in previous.items():
+            if content is None:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            else:
+                atomic_write(path, content, 0o644)
         try:
             apply_system(old)
         except Exception:
@@ -912,12 +1499,12 @@ def enable_adult_protection() -> None:
         raise
 
 
-def disable_adult_protection() -> None:
-    require_root()
-    old = load_state()
-    new = json.loads(json.dumps(old))
-    new["adult_protection"]["enabled"] = False
-    apply_transaction(old, new)
+# 0.4.x action names, kept so older scripts and the postinst keep working.
+LEGACY_ADULT_ACTIONS = {
+    "adult-enable": {"lists": {"adult": True}},
+    "adult-update": {"lists": {"adult": True}, "refresh": True},
+    "adult-disable": {"lists": {"adult": False}},
+}
 
 
 def configure_squid_proxy(payload: dict) -> None:
@@ -958,10 +1545,16 @@ def cleanup_system() -> None:
             atomic_write(HOSTS_PATH, cleaned, stat.S_IMODE(file_stat.st_mode))
     except (OSError, UnicodeError, HelperError):
         pass
-    try:
-        DNSMASQ_RULES_PATH.unlink()
-    except FileNotFoundError:
-        pass
+    # First stop routing systemd-resolved to dnsmasq, which is going away.
+    if RESOLVED_DROPIN_PATH.exists():
+        RESOLVED_DROPIN_PATH.unlink()
+        restart_resolved()
+    for path in (DNSMASQ_RULES_PATH, DNSMASQ_LISTS_PATH):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    apply_browser_policies({"strict_mode": {"enabled": False}})
     try:
         clear_firewall()
     except HelperError:
@@ -976,31 +1569,49 @@ def cleanup_system() -> None:
     reload_dns_plugin(full=True)
 
 
-def dispatch(action: str, payload: dict) -> dict:
+def prepare(action: str, payload: dict | None = None) -> object:
+    """Slow network work that must not hold the system lock."""
+    payload = LEGACY_ADULT_ACTIONS.get(action, payload or {})
+    if action == "sync-smart-ips":
+        require_root()
+        return prepare_sync(load_state())
+    if action == "protection-configure" or action in LEGACY_ADULT_ACTIONS:
+        require_root()
+        return prepare_protection(payload)
+    return None
+
+
+def dispatch(action: str, payload: dict, prepared: object = None) -> dict:
+    extra: dict = {}
     if action == "status":
         return public_status()
     if action == "setup":
         setup_credentials(payload, replace=False)
     elif action == "change-credentials":
         setup_credentials(payload, replace=True)
+    elif action == "account-info":
+        extra["account"] = account_info()
     elif action == "add":
         add_entry(payload)
+    elif action == "import":
+        extra["import_result"] = import_entries(payload)
     elif action == "remove":
         remove_entry(payload)
-    elif action in {"adult-enable", "adult-update"}:
-        enable_adult_protection()
-    elif action == "adult-disable":
-        disable_adult_protection()
+    elif action == "protection-configure":
+        configure_protection(payload, prepared)
+    elif action in LEGACY_ADULT_ACTIONS:
+        configure_protection(LEGACY_ADULT_ACTIONS[action], prepared)
     elif action == "squid-configure":
         configure_squid_proxy(payload)
     elif action == "sync-smart-ips":
-        sync_smart_ips()
+        sync_smart_ips(prepared["domains"], prepared["safe_ips"], prepared["lists"])
     elif action == "apply-firewall":
         require_root()
         apply_firewall(load_state())
     elif action == "apply-system":
         require_root()
         state = load_state()
+        state["dns_mode"] = detect_dns_mode()
         save_state(state)
         apply_system(state)
     elif action == "apply-squid":
@@ -1013,7 +1624,9 @@ def dispatch(action: str, payload: dict) -> dict:
         cleanup_system()
     else:
         raise HelperError("err_unknown_command")
-    return public_status()
+    result = public_status()
+    result.update(extra)
+    return result
 
 
 def main() -> int:
@@ -1023,8 +1636,9 @@ def main() -> int:
         if action == "status":
             result = dispatch(action, payload)
         else:
+            prepared = prepare(action, payload)
             with exclusive_system_lock():
-                result = dispatch(action, payload)
+                result = dispatch(action, payload, prepared)
         print(json.dumps({"ok": True, "data": result}, ensure_ascii=False))
         return 0
     except (HelperError, ValidationError) as exc:

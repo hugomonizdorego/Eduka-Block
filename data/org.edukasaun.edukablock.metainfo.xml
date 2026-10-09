@@ -7,13 +7,37 @@
   <project_license>GPL-3.0-or-later</project_license>
   <description>
     <p>Eduka-Block helps parents and teachers block harmful websites, domains, subdomains, IP addresses and CIDR ranges for all users of an Edukasaun OS computer.</p>
-    <p>It combines wildcard DNS, a managed /etc/hosts section, nftables and smart IP synchronization below the browser layer.</p>
+    <p>It combines wildcard DNS, a managed /etc/hosts section, nftables, category blocklists, SafeSearch and encrypted-DNS anti-bypass below the browser layer. One click turns on the recommended protection.</p>
     <p>The interface defaults to International English and includes Tetum, European Portuguese, Brazilian Portuguese and Indonesian.</p>
   </description>
   <launchable type="desktop-id">eduka-block.desktop</launchable>
+  <icon type="stock">eduka-block</icon>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Dashboard with protection layers</caption>
+      <image>https://raw.githubusercontent.com/hugomonizdorego/Eduka-Block/main/docs/screenshots/dashboard.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Category lists and SafeSearch</caption>
+      <image>https://raw.githubusercontent.com/hugomonizdorego/Eduka-Block/main/docs/screenshots/categories.png</image>
+    </screenshot>
+  </screenshots>
   <url type="homepage">https://edukasaunos.tl</url>
   <developer id="tl.edukasaunos"><name>STI-MCAS &amp; IDEA</name></developer>
+  <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.2" date="2026-10-02">
+      <description><p>Subdomain filtering now works on systems that use systemd-resolved, blocking a platform also blocks its related domains, a Turn off protection button, and a separate Squid Proxy page.</p></description>
+    </release>
+    <release version="0.5.1" date="2026-10-01">
+      <description><p>Official logo, account recovery for forgotten usernames and passwords (sign-in screen and eduka-block-reset), and safe installation inside image builders such as Cubic.</p></description>
+    </release>
+    <release version="0.5.0" date="2026-10-01">
+      <description><p>Redesigned interface with dashboard and one-click recommended protection, category lists for adult content, gambling, social media and malware, SafeSearch and encrypted-DNS anti-bypass, browser policies, and a single-file offline installer.</p></description>
+    </release>
+    <release version="0.4.2" date="2026-09-30">
+      <description><p>Rule import and export, multi-rule removal, manual IP synchronisation, fixed firewall failures with overlapping IP ranges, Debian 13 PolicyKit dependencies, a non-freezing interface and complete translations.</p></description>
+    </release>
     <release version="0.4.1" date="2026-09-05">
       <description><p>Subtle 3D interface, red blocked-rule indicators, confirmed five-character-minimum passwords, and hardened atomic nftables and localhost-only Squid configuration.</p></description>
     </release>

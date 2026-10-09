@@ -1,10 +1,21 @@
-/* Eduka-Block 0.4.1 — subtle soft-3D GTK design
- * Small shadows and layered borders add depth without making controls bulky.
- * Colours remain adaptive to Edukasaun Desktop's active GTK theme.
+/* Eduka-Block — modern GTK 3 design
+ *
+ * A dark sidebar with the brand blue and green from the logo, rounded cards with soft
+ * shadows and clear status colours. Page and card colours still come from the
+ * active GTK theme, so light and dark desktop themes both stay readable.
+ * Every rule is scoped to Eduka-Block windows; popovers, file choosers and
+ * message dialogs keep the native theme.
  */
 
-@define-color eb_danger #d92f45;
-@define-color eb_warning #c47a16;
+@define-color eb_accent #0b5cad;
+@define-color eb_accent_dark #094a8c;
+@define-color eb_sidebar #0f1e2d;
+@define-color eb_sidebar_fg #d5e3ec;
+@define-color eb_success #23963a;
+@define-color eb_warning #d97706;
+@define-color eb_danger #dc2626;
+
+/* ---------------------------------------------------------------- window */
 
 .eduka-window,
 .auth-dialog {
@@ -12,240 +23,441 @@
     color: @theme_fg_color;
 }
 
-.topbar {
-    background-color: @theme_base_color;
-    color: @theme_text_color;
-    border-bottom: 1px solid shade(@theme_bg_color, 0.78);
-    box-shadow: 0 2px 3px alpha(#000000, 0.14);
+.eduka-window .page {
+    padding: 28px 32px 32px 32px;
 }
 
-.card,
-.auth-panel,
-.form-box {
-    background-color: @theme_base_color;
-    color: @theme_text_color;
-    border: 1px solid shade(@theme_bg_color, 0.76);
-    border-radius: 7px;
-    box-shadow: 0 1px 3px alpha(#000000, 0.14);
+.eduka-window .page-title {
+    font-size: 20pt;
+    font-weight: 800;
 }
 
-.card {
-    margin: 0;
+.eduka-window .page-subtitle {
+    color: alpha(@theme_fg_color, 0.62);
 }
 
-.protection-card {
-    background-color: @theme_base_color;
-    border: 1px solid alpha(@theme_selected_bg_color, 0.70);
-    box-shadow: 0 2px 4px alpha(#000000, 0.15);
+/* ---------------------------------------------------------------- sidebar */
+
+.eduka-window .sidebar {
+    background-color: @eb_sidebar;
+    color: @eb_sidebar_fg;
+    padding: 18px 12px 16px 12px;
 }
 
-.brand-box,
-.boxed-heading,
-.section-title,
-.subtitle-box,
-.field-label,
-.text-box,
-.info-box,
-.hint-box,
-.badge,
-.status-ok,
-.status-warning,
-.status-error,
-.code-box,
-.password-status {
-    border-radius: 5px;
-    padding: 3px 8px;
+.eduka-window .brand {
+    padding: 2px 8px 22px 8px;
 }
 
-.brand-box {
-    background-color: @theme_selected_bg_color;
-    color: @theme_selected_fg_color;
-    border: 1px solid shade(@theme_selected_bg_color, 0.76);
-    box-shadow: 0 1px 2px alpha(#000000, 0.18);
+.eduka-window .brand-name {
+    color: #ffffff;
+    font-size: 14pt;
+    font-weight: 800;
 }
 
-.boxed-heading,
-.section-title {
-    background-color: alpha(@theme_selected_bg_color, 0.14);
-    color: @theme_text_color;
-    border: 1px solid alpha(@theme_selected_bg_color, 0.50);
-    box-shadow: 0 1px 2px alpha(#000000, 0.10);
-    font-weight: bold;
+.eduka-window .brand-version,
+.eduka-window .sidebar-note {
+    color: alpha(@eb_sidebar_fg, 0.62);
+    font-size: 8.5pt;
 }
 
-.subtitle-box,
-.field-label,
-.text-box {
-    background-color: @theme_bg_color;
-    color: @theme_fg_color;
-    border: 1px solid shade(@theme_bg_color, 0.76);
-    box-shadow: inset 0 1px 1px alpha(#ffffff, 0.10);
-}
-
-.field-label {
-    font-weight: 600;
-}
-
-.info-box,
-.hint-box {
-    background-color: alpha(@theme_selected_bg_color, 0.07);
-    color: @theme_fg_color;
-    border: 1px solid alpha(@theme_selected_bg_color, 0.30);
-    box-shadow: inset 0 1px 1px alpha(#ffffff, 0.08);
-    font-size: 0.88em;
-}
-
-.hint-box {
-    background-color: @theme_bg_color;
-    border-style: dashed;
-}
-
-.muted,
-.fine-print {
-    color: alpha(@theme_fg_color, 0.78);
-}
-
-.badge,
-.status-ok {
-    background-color: alpha(@theme_selected_bg_color, 0.13);
-    color: @theme_fg_color;
-    border: 1px solid alpha(@theme_selected_bg_color, 0.46);
-    box-shadow: 0 1px 2px alpha(#000000, 0.10);
-    font-weight: 600;
-}
-
-.status-warning {
-    background-color: alpha(@eb_warning, 0.11);
-    color: @theme_fg_color;
-    border: 1px solid alpha(@eb_warning, 0.58);
-    box-shadow: 0 1px 2px alpha(#000000, 0.09);
-    font-weight: 600;
-}
-
-.status-error,
-.blocked-summary {
-    background-color: alpha(@eb_danger, 0.10);
-    color: @eb_danger;
-    border: 1px solid alpha(@eb_danger, 0.62);
-    box-shadow: 0 1px 2px alpha(#000000, 0.10);
-    font-weight: bold;
-}
-
-button,
-entry,
-searchentry,
-combobox button {
-    border-radius: 5px;
-    border: 1px solid shade(@theme_bg_color, 0.70);
+.eduka-window .sidebar .nav-button {
     background-image: none;
-    min-height: 26px;
-    padding: 2px 7px;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    color: alpha(@eb_sidebar_fg, 0.86);
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-weight: 600;
 }
 
-button,
-combobox button {
+.eduka-window .sidebar .nav-button:hover {
+    background-color: alpha(#ffffff, 0.07);
+    color: #ffffff;
+}
+
+.eduka-window .sidebar .nav-button:checked {
+    background-color: @eb_accent;
+    color: #ffffff;
+    box-shadow: 0 4px 12px alpha(@eb_accent, 0.35);
+}
+
+.eduka-window .sidebar .nav-button:disabled {
+    color: alpha(@eb_sidebar_fg, 0.35);
+}
+
+.eduka-window .sidebar-spinner {
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+.eduka-window .sidebar .sidebar-lock,
+.eduka-window .sidebar-combo button {
+    background-image: none;
+    background-color: alpha(#ffffff, 0.07);
+    color: #ffffff;
+    border: 1px solid alpha(#ffffff, 0.12);
+    border-radius: 10px;
+    box-shadow: none;
+    padding: 7px 12px;
+}
+
+.eduka-window .sidebar .sidebar-lock:hover,
+.eduka-window .sidebar-combo button:hover {
+    background-color: alpha(#ffffff, 0.14);
+}
+
+.eduka-window .sidebar-combo {
+    margin: 8px 0 6px 0;
+}
+
+/* ---------------------------------------------------------------- cards */
+
+.eduka-window .card {
     background-color: @theme_base_color;
-    box-shadow: 0 1px 2px alpha(#000000, 0.16);
-}
-
-button:hover,
-combobox button:hover {
-    border-color: alpha(@theme_selected_bg_color, 0.68);
-    box-shadow: 0 2px 3px alpha(#000000, 0.16);
-}
-
-button:active,
-combobox button:active {
-    box-shadow: inset 0 1px 2px alpha(#000000, 0.16);
-}
-
-entry,
-searchentry {
-    background-color: @theme_base_color;
-    box-shadow: inset 0 1px 2px alpha(#000000, 0.10);
-}
-
-button.suggested-action {
-    background-color: @theme_selected_bg_color;
-    color: @theme_selected_fg_color;
-    border-color: shade(@theme_selected_bg_color, 0.76);
-    box-shadow: 0 1px 3px alpha(#000000, 0.20);
-    font-weight: bold;
-}
-
-button.destructive-action {
-    color: @eb_danger;
-    border-color: alpha(@eb_danger, 0.60);
-    background-color: alpha(@eb_danger, 0.07);
-}
-
-entry:focus,
-searchentry:focus,
-combobox button:focus {
-    border: 2px solid @theme_selected_bg_color;
-    box-shadow: 0 1px 3px alpha(@theme_selected_bg_color, 0.22);
-}
-
-switch {
-    border-radius: 5px;
-    box-shadow: inset 0 1px 2px alpha(#000000, 0.12);
-}
-
-switch:checked {
-    background-color: @theme_selected_bg_color;
-    color: @theme_selected_fg_color;
-}
-
-scrolledwindow {
-    border: 1px solid shade(@theme_bg_color, 0.74);
-    border-radius: 6px;
-    box-shadow: inset 0 1px 2px alpha(#000000, 0.09);
-}
-
-notebook.main-tabs {
-    border: 0;
-}
-
-notebook.main-tabs header {
-    background-color: @theme_base_color;
-    border: 1px solid shade(@theme_bg_color, 0.76);
-    border-radius: 6px;
-    padding: 2px;
-    box-shadow: 0 1px 3px alpha(#000000, 0.13);
-}
-
-notebook.main-tabs header tabs tab {
-    border-radius: 5px;
-    padding: 4px 12px;
-}
-
-notebook.main-tabs header tabs tab:checked {
-    background-color: @theme_selected_bg_color;
-    color: @theme_selected_fg_color;
-    box-shadow: 0 1px 2px alpha(#000000, 0.16);
-}
-
-.code-box {
-    background-color: @theme_bg_color;
     color: @theme_text_color;
-    border: 1px dashed alpha(@theme_fg_color, 0.36);
-    box-shadow: inset 0 1px 2px alpha(#000000, 0.09);
+    border: 1px solid alpha(@theme_fg_color, 0.08);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 2px alpha(#000000, 0.05), 0 6px 18px alpha(#000000, 0.05);
+}
+
+.eduka-window .card-title {
+    font-size: 12pt;
+    font-weight: 700;
+}
+
+.eduka-window .card-text,
+.eduka-window .row-text {
+    color: alpha(@theme_fg_color, 0.64);
+    font-size: 9.5pt;
+}
+
+.eduka-window .fine-print {
+    color: alpha(@theme_fg_color, 0.5);
+    font-size: 8.5pt;
+}
+
+/* ---------------------------------------------------------------- dashboard */
+
+.eduka-window .hero {
+    padding: 26px 28px;
+}
+
+.eduka-window .hero-ok {
+    background-color: mix(@theme_base_color, @eb_success, 0.09);
+    border-color: alpha(@eb_success, 0.35);
+}
+
+.eduka-window .hero-warning {
+    background-color: mix(@theme_base_color, @eb_warning, 0.09);
+    border-color: alpha(@eb_warning, 0.40);
+}
+
+.eduka-window .hero-error {
+    background-color: mix(@theme_base_color, @eb_danger, 0.08);
+    border-color: alpha(@eb_danger, 0.40);
+}
+
+.eduka-window .hero-ok .hero-icon {
+    color: @eb_success;
+}
+
+.eduka-window .hero-warning .hero-icon {
+    color: @eb_warning;
+}
+
+.eduka-window .hero-error .hero-icon {
+    color: @eb_danger;
+}
+
+.eduka-window .hero-title {
+    font-size: 17pt;
+    font-weight: 800;
+}
+
+.eduka-window .hero-subtitle {
+    color: alpha(@theme_fg_color, 0.68);
+}
+
+.eduka-window .layer {
+    background-color: alpha(@theme_fg_color, 0.035);
+    border-radius: 10px;
+    padding: 9px 12px;
+}
+
+.eduka-window .layer-on image {
+    color: @eb_success;
+}
+
+.eduka-window .layer-off image {
+    color: @eb_danger;
+}
+
+.eduka-window .layer-off .layer-text {
+    color: alpha(@theme_fg_color, 0.58);
+}
+
+.eduka-window .stat {
+    padding: 16px 18px;
+}
+
+.eduka-window .stat-value {
+    color: @eb_accent;
+    font-size: 18pt;
+    font-weight: 800;
+}
+
+.eduka-window .stat-label {
+    color: alpha(@theme_fg_color, 0.6);
+    font-size: 9pt;
+}
+
+/* ---------------------------------------------------------------- toggle rows */
+
+.eduka-window .list-card {
+    padding: 4px 20px;
+}
+
+.eduka-window .toggle-row {
+    padding: 14px 0;
+}
+
+.eduka-window .row-icon {
+    background-color: alpha(@eb_accent, 0.12);
+    color: @eb_accent;
+    border-radius: 12px;
+    min-width: 42px;
+    min-height: 42px;
+}
+
+.eduka-window .row-title {
+    font-size: 11pt;
+    font-weight: 700;
+}
+
+.eduka-window .row-detail {
+    font-size: 9pt;
+    font-weight: 700;
+}
+
+.eduka-window .row-detail.status-ok {
+    color: @eb_success;
+}
+
+.eduka-window .row-detail.status-warning {
+    color: alpha(@theme_fg_color, 0.45);
+}
+
+.eduka-window .row-actions {
+    padding: 0 0 14px 58px;
+}
+
+/* ---------------------------------------------------------------- pills & chips */
+
+.eduka-window .pill,
+.auth-dialog .password-status {
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 9pt;
+    font-weight: 700;
+}
+
+.eduka-window .pill.status-ok,
+.auth-dialog .password-status.status-ok {
+    background-color: alpha(@eb_success, 0.12);
+    color: @eb_success;
+}
+
+.eduka-window .pill.status-warning,
+.auth-dialog .password-status.status-warning {
+    background-color: alpha(@eb_warning, 0.13);
+    color: @eb_warning;
+}
+
+.eduka-window .pill.status-error,
+.auth-dialog .password-status.status-error {
+    background-color: alpha(@eb_danger, 0.12);
+    color: @eb_danger;
+}
+
+.eduka-window flowboxchild {
+    padding: 0;
+    border-radius: 999px;
+}
+
+.eduka-window flowboxchild:selected {
+    background-color: transparent;
+}
+
+.eduka-window .chip {
+    background-color: alpha(@eb_accent, 0.10);
+    color: @eb_accent_dark;
+    border-radius: 999px;
+    padding: 5px 14px;
+    font-weight: 600;
+}
+
+.eduka-window flowboxchild:selected .chip {
+    background-color: @eb_accent;
+    color: #ffffff;
+}
+
+.eduka-window .code-box {
+    background-color: alpha(@theme_fg_color, 0.05);
+    border-radius: 10px;
+    padding: 10px 14px;
     font-family: monospace;
-    font-size: 0.88em;
+    font-size: 9pt;
 }
 
-treeview header button {
+/* ---------------------------------------------------------------- toast */
+
+.eduka-window .toast {
+    background-color: #1f2937;
+    color: #f9fafb;
+    border-radius: 12px;
+    padding: 11px 18px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 24px alpha(#000000, 0.28);
+}
+
+.eduka-window .toast-ok image {
+    color: #34d399;
+}
+
+.eduka-window .toast-warning image {
+    color: #fbbf24;
+}
+
+.eduka-window .toast-error image {
+    color: #f87171;
+}
+
+/* ---------------------------------------------------------------- controls */
+
+.eduka-window button,
+.auth-dialog button {
+    background-image: none;
+    border-radius: 10px;
+    padding: 6px 14px;
+    min-height: 22px;
+}
+
+.eduka-window button.suggested-action,
+.auth-dialog button.suggested-action {
+    background-color: @eb_accent;
+    color: #ffffff;
+    border: 1px solid @eb_accent_dark;
+    font-weight: 700;
+    box-shadow: 0 2px 8px alpha(@eb_accent, 0.30);
+}
+
+.eduka-window button.suggested-action:hover,
+.auth-dialog button.suggested-action:hover {
+    background-color: @eb_accent_dark;
+}
+
+.eduka-window button.suggested-action:disabled,
+.auth-dialog button.suggested-action:disabled {
+    background-color: alpha(@eb_accent, 0.40);
+    color: alpha(#ffffff, 0.85);
+    box-shadow: none;
+}
+
+.eduka-window button.destructive-action {
+    background-color: alpha(@eb_danger, 0.08);
+    color: @eb_danger;
+    border: 1px solid alpha(@eb_danger, 0.35);
+}
+
+.eduka-window button.destructive-action:disabled {
+    background-color: transparent;
+    color: alpha(@theme_fg_color, 0.35);
+    border-color: alpha(@theme_fg_color, 0.12);
+}
+
+.eduka-window .hero-button {
+    padding: 10px 18px;
+}
+
+.auth-dialog button.flat-button {
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: @eb_accent_dark;
+}
+
+.eduka-window entry,
+.auth-dialog entry {
+    border-radius: 10px;
+    min-height: 34px;
+    padding: 0 12px;
+}
+
+.eduka-window entry:focus,
+.auth-dialog entry:focus {
+    border-color: @eb_accent;
+    box-shadow: inset 0 0 0 1px @eb_accent;
+}
+
+.eduka-window switch:checked {
+    background-color: @eb_accent;
+    border-color: @eb_accent_dark;
+}
+
+.eduka-window .list-frame {
+    border: 1px solid alpha(@theme_fg_color, 0.10);
+    border-radius: 10px;
+}
+
+.eduka-window treeview header button {
+    font-weight: 700;
     border-radius: 0;
-    border-width: 0 1px 1px 0;
-    box-shadow: 0 1px 2px alpha(#000000, 0.10);
-    font-weight: bold;
 }
 
-treeview:selected {
-    background-color: @theme_selected_bg_color;
-    color: @theme_selected_fg_color;
+.eduka-window treeview:selected {
+    background-color: alpha(@eb_accent, 0.85);
+    color: #ffffff;
 }
 
-.auth-icon {
-    color: @theme_selected_bg_color;
+/* ---------------------------------------------------------------- sign-in */
+
+.auth-dialog .auth-panel {
+    padding: 14px 30px 10px 30px;
+}
+
+.auth-dialog .auth-title {
+    font-size: 16pt;
+    font-weight: 800;
+}
+
+.auth-dialog .auth-note {
+    color: alpha(@theme_fg_color, 0.62);
+}
+
+.auth-dialog .dialog-action-box,
+.auth-dialog .dialog-action-area {
+    margin: 4px 22px 18px 22px;
+}
+
+.auth-dialog .link-button {
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: @eb_accent;
+    padding: 2px 0;
+    min-height: 0;
+    font-size: 9.5pt;
+}
+
+.auth-dialog .link-button:hover {
+    color: @eb_accent_dark;
+    text-decoration: underline;
+}
+
+.auth-dialog .field-label {
+    font-weight: 700;
+    font-size: 9.5pt;
+    margin-top: 6px;
 }
